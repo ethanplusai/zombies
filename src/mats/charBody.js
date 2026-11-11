@@ -61,7 +61,7 @@ float gHairThr = 0.5;
 float sChLock() {
   bool cover = gA.z > 2.0;
   float lu = gA.x * 8.0, id = floor(lu), c = fract(lu) - 0.5, v = gA.y;
-  float seed = fract(gA.z * 37.0);
+  float seed = cover ? 0.0 : fract(gA.z * 37.0);       // (a lock's own; the cover's shade varies across it)
   float E = cover ? 0.5 : 0.48 * (1.0 - 0.82 * smoothstep(0.3, 1.0, v));
   float cw = cover ? 0.0 : 0.075 * sin(v * 4.6 + id * 2.4 + seed * 40.0) * smoothstep(0.2, 1.0, v);
   float q = (c - cw) / E;

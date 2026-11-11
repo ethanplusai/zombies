@@ -313,7 +313,7 @@ describe('the Roadflare', () => {
   });
 });
 
-describe('molotov, pools and decoys', () => {
+describe('molotov and thrown-item edge cases', () => {
   it('a flying molotov breaks on a zombie in its path', () => {
     const s = setup();
     s.G.zombies.raycast = (o, d, max) => {

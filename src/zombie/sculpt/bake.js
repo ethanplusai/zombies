@@ -122,7 +122,8 @@ float enc(float t) { return 0.5 + 0.5 * sign(t) * sqrt(min(abs(t), 3.0) / 3.0); 
 void main() {
   vec3 N0 = normalize(vN);
   vec3 p = vP;
-  p -= N0 * sdFigure(p); p -= N0 * sdFigure(p);
+  float d0 = sdFigure(p);       // how far the cage itself is from the skin here
+  p -= N0 * d0; p -= N0 * sdFigure(p);
   // detailed normal: tetrahedral taps
   const float e = 0.00022;
   const vec2 k = vec2(1.0, -1.0);
@@ -179,7 +180,11 @@ void main() {
   alb = mix(alb, vec3(0.15, 0.062, 0.055), perioral * 0.5);
   // the bridge and tip of the nose stay pale and waxy, so the nose stands apart from the mouth under it
   float noseK = (1.0 - smoothstep(0.006, 0.016, segDist(q, vec3(0.0, 1.69, 0.094), vec3(0.0, 1.65, 0.114)))) * head;
+  noseK *= 1.0 - smoothstep(0.006, 0.012, q.x);       // (the ridge only: on the wings the pale stood out as hard-edged patches beside the nostrils)
   alb = mix(alb, alb * 1.25 + vec3(0.015, 0.014, 0.01), noseK * 0.6);
+  // the wings of the nose and the crease behind them: raw and dark, so they sink into the cheek
+  float wing = (1.0 - smoothstep(0.5, 1.15, length((q - vec3(0.0165, 1.6445, 0.097)) / vec3(0.011, 0.01, 0.014)))) * head;
+  alb = mix(alb, alb * vec3(0.72, 0.5, 0.48), wing * 0.7);
   // raw at the knuckles, elbows, knees, nostrils and lid edges
   float raw = 0.0;
   for (int i = 0; i < uJointN; i++) raw = max(raw, 1.0 - smoothstep(0.3, 0.9, length(q - uJoint[i].xyz) / uJoint[i].w));
@@ -203,6 +208,16 @@ void main() {
     float brow = (1.0 - smoothstep(0.0028, 0.0062, bd)) * smoothstep(0.38, 0.6, st + (1.0 - bd / 0.006) * 0.25) * head;
     alb = mix(alb, vec3(0.022, 0.018, 0.015), brow * 0.9);
     rough = mix(rough, 0.7, brow);
+  }
+  // Where the cage cannot follow the skin (one radial sheet from the tip of the nose to the lip and
+  // the cheek: under the nose, behind its wings) a texel is not on the skin at all. It is the
+  // shadow in that hollow: dark, matt and flat, not a smear of the pale nose across it.
+  float hollow = smoothstep(0.0012, 0.0032, abs(d0)) * head * step(0.07, q.z) * (1.0 - smoothstep(0.028, 0.038, q.x)) * smoothstep(1.622, 1.63, q.y) * (1.0 - smoothstep(1.664, 1.672, q.y));
+  if (hollow > 0.0) {
+    alb = mix(alb, vec3(0.03, 0.015, 0.014), hollow * 0.9);
+    rough = mix(rough, 0.85, hollow);
+    oNormalAo.rg = mix(oNormalAo.rg, vec2(0.5), hollow);
+    oNormalAo.b *= 1.0 - 0.75 * hollow;
   }
   float special = 0.0;
   // the eyeball where it shows: yellowed white with red threads, darker under the lids

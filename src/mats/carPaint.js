@@ -474,8 +474,8 @@ void surfaceMain(inout Surf s) {`);
     tyreMaterial: tyre,
     // hazards: on for a little under half of each 1.1 s cycle (the level's flashers keep the same time)
     update(t) { blink.value = (t % 1.1) < 0.48 ? 1 : 0; },
-    // ---- the factories: stand-alone materials of the same programs, for a mesh
-    // that carries no vertex attributes (a prop built from car parts)
+    // ---- the factory functions: stand-alone materials of the same programs, for a mesh
+    // that carries no vertex attributes (a prop another task builds from car parts)
     clearcoat: (o = {}) => makeBody({ color: o.color, vertexColors: false, dirt: o.dirt, rust: o.rust, chips: o.chips, cls: 0 }, o.flake !== undefined ? { metalness: o.flake } : {}, 'body:u'),
     carGlass: () => glassBase,
     tyre,

@@ -20,7 +20,7 @@ describe('parseParams', () => {
   it('empty input gives empty object', () => {
     expect(parseParams('')).toEqual({});
   });
-  it('parses the phase 2 harness params, typed', () => {
+  it('parses the extended harness params, typed', () => {
     expect(parseParams('?q=mobile&touch=1&rs=0.7&zone=motel&give=smg,pump&open=all&points=5000')).toEqual({
       q: 'mobile', touch: true, rs: 0.7, zone: 'motel', give: ['smg', 'pump'], open: 'all', points: 5000,
     });

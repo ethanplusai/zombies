@@ -33,7 +33,7 @@ export function createGame(G) {
   const liveIds = new Set(); // ids of the zombies present this frame (reused)
   const director = createRoundDirector({
     rng: G.rng.fork('rounds'),
-    // The zombie AI may narrow this to the reachable zones (G.level.activeSpawnPoints)
+    // The AI may narrow this to the reachable zones (G.level.activeSpawnPoints)
     spawnPoints: () => (G.level && (typeof G.level.activeSpawnPoints === 'function' ? G.level.activeSpawnPoints() : G.level.spawnPoints)) || [],
     spawn: (point, n, type) => {
       const z = G.zombies;
@@ -66,7 +66,7 @@ export function createGame(G) {
   const purchases = createPurchases({ economy, weapon, emit, level: lv, box, bench, machines, loot });
   const interact = createInteract({ interactables, purchases });
 
-  // Interactables for the spots worldLayout places (wall buys, the box, the bench, the machines) and one
+  // Interactables for the spots worldLayout placed (wall buys, the box, the bench, the machines) and one
   // per searchable. Labels and prices are live: the HUD prompt reads `label` and `cost` each frame.
   let boxZoneFor = null, boxZone = null;
   if (L0 && Array.isArray(L0.interactables)) {

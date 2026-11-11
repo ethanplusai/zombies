@@ -1,6 +1,6 @@
-// The end screen: replaces menus' 'dead' screen. Renders G.game.summary().rows as given, so a new
-// row can be added in the game module and nothing here changes. Leaves a marked slot for the optional
-// "save your stats" form that the launch module builds (no network code here):
+// The end screen: replaces menus' 'dead' screen. Renders G.game.summary().rows as given, so a later
+// new stat adds a row in the game module and nothing here changes. Leaves a marked slot for the optional
+// "save your stats" form that the leaderboard UI fills in (no network code here):
 //
 //   G.ui.endScreen = {
 //     slot,                     // the empty <div class="gs-endslot" data-slot="gamertag"> between the stats and Retry

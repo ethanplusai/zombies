@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { tuning } from '../src/game/tuning.js';
 
 describe('tuning aggregator', () => {
-  it('keeps the phase 1 keys alive with every phase 2 file a placeholder', () => {
+  it('keeps the original keys alive with every section file a placeholder', () => {
     expect(tuning.pistol.mag).toBe(12);
     expect(tuning.walker.health(9)).toBe(950);
     expect(tuning.round.total(5)).toBe(26);
@@ -10,10 +10,10 @@ describe('tuning aggregator', () => {
     expect(tuning.wallAmmo.cost).toBe(250);
     expect(tuning.player.eye).toBe(1.7);
   });
-  it('has a section per owner', () => {
+  it('has a section per module', () => {
     for (const k of ['touch', 'weapons', 'world', 'economy', 'loot', 'zombies']) expect(typeof tuning[k]).toBe('object');
   });
-  it('an owner section that defines a key overrides the core fallback', async () => {
+  it('a module section that defines a key overrides the core fallback', async () => {
     vi.resetModules();
     vi.doMock('../src/game/tuning/weapons.js', () => ({ weapons: { pistol: { mag: 99 } } }));
     const { tuning: t } = await import('../src/game/tuning.js');

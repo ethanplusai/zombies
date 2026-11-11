@@ -10,7 +10,7 @@
 import { box, outline, plan, lathe, modelKit } from '../geo.js';
 
 export const HELD = [0, -28, -70];
-// materials shared by the hand props (knife.js, axe.js)
+// materials shared by the hand props built here (knife.js, axe.js)
 export function propMats(G, patch) {
   const mats = G.mats, rest = { space: 'rest', shelter: 0.5 };
   return {

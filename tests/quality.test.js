@@ -28,7 +28,7 @@ describe('PRESETS', () => {
       charTex: 1024, particles: 1536, decals: 96,
     });
   });
-  it('desktop tiers keep their phase 1 values', () => {
+  it('desktop tiers keep their original values', () => {
     expect(PRESETS.high).toMatchObject({ maxHeight: 1080, shadowRes: 2048, volSteps: 32, aoOn: true, msaa: 4, bloomMips: 7 });
     expect(PRESETS.medium).toMatchObject({ maxHeight: 900, shadowRes: 1536, volSteps: 20, aoOn: true, msaa: 2, bloomMips: 6 });
     expect(PRESETS.low).toMatchObject({ maxHeight: 720, shadowRes: 1024, volSteps: 12, aoOn: false, msaa: 0, bloomMips: 5 });
@@ -47,11 +47,14 @@ describe('PRESETS', () => {
     expect(TIERS.map((t) => PRESETS[t].depthPrepass)).toEqual([true, true, true, false]);
     expect(TIERS.map((t) => PRESETS[t].volLamps)).toEqual([16, 16, 16, 16]);
   });
-  it('budget levers for other owners: mobile draws less, desktop tiers change nothing', () => {
+  it('budget levers for other modules: mobile draws less, desktop tiers change nothing', () => {
     for (const name of ['high', 'medium', 'low']) expect(PRESETS[name]).toMatchObject({ propDensity: 1, zoneDepth: 2 });
     expect(PRESETS.mobile).toMatchObject({ propDensity: 0.5, zoneDepth: 1 });
   });
-  it('fields owners wait on: viewDetail (weapon view detail) and vehicleNear (vehicle near-LOD metres)', () => {
+  it('zombieShadowMax: bodies per shadow map, fewer down the tiers, none on mobile (blob shadows)', () => {
+    expect(TIERS.map((t) => PRESETS[t].zombieShadowMax)).toEqual([8, 6, 4, 0]);
+  });
+  it('fields other modules wait on: viewDetail (weapon view detail) and vehicleNear (vehicle near-LOD metres)', () => {
     expect(TIERS.map((t) => PRESETS[t].viewDetail)).toEqual([1, 1, 0.5, 0]);
     expect(TIERS.map((t) => PRESETS[t].vehicleNear)).toEqual([12, 10, 8, 6]);
   });
@@ -223,7 +226,7 @@ describe('createDynRes', () => {
 });
 
 describe('createQuality', () => {
-  it('q=mobile selects the mobile tier; name stays a phase 1 name for code that keys on it', () => {
+  it('q=mobile selects the mobile tier; name stays an original name for code that keys on it', () => {
     const q = createQuality(makeG({ q: 'mobile' }), env());
     expect(q.tier).toBe('mobile');
     expect(q.name).toBe('low');

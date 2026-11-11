@@ -53,7 +53,7 @@ describe('weapon table', () => {
     expect(new Set(WEAPON_IDS.map((id) => WEAPONS[id].upgraded.name)).size).toBe(10);
   });
 
-  it('keeps tuning.pistol in its phase 1 shape', () => {
+  it('keeps tuning.pistol in its original shape', () => {
     expect(tuning.pistol).toMatchObject({ mag: 12, reserve: 48, maxReserve: 96, damage: 40, rpm: 400, semiAuto: true, reload: 1.6, range: 60 });
   });
 

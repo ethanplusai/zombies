@@ -469,7 +469,7 @@ describe('objective line', () => {
   });
 });
 
-describe('hint copy and timing', () => {
+describe('hint copy, icons and ordering', () => {
   it('icons in copy: [@name] draws the button icon and reads as the button in plain text', () => {
     expect(parseCopy('Tap [@reload] to reload')).toEqual([{ t: 'Tap ', key: false }, { t: 'reload', key: true, icon: 'reload' }, { t: ' to reload', key: false }]);
     expect(plainCopy('Tap [@reload] to reload')).toBe('Tap the reload button to reload');

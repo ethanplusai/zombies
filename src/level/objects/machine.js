@@ -99,7 +99,7 @@ export function placeMachine(ctx, spot, yaw) {
   });
 }
 
-// A machine on its own (the stand-alone builder): { geometry, channels, setState, update } for a mesh
+// A machine on its own (the standard builder signature): { geometry, channels, setState, update } for a mesh
 // with the object material; gains are written into `gain` (createYardMats(G).gain).
 export function buildMachine(kind, gain) {
   const ch = { a: channel(), b: channel() };

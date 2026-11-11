@@ -423,7 +423,7 @@ describe('zombies are solid to the player', () => {
 });
 
 
-describe('phase 2 player hooks', () => {
+describe('player hooks', () => {
   const makeG = (params = {}) => {
     const G = { params, events: createEvents(), time: { t: 0 }, level: null, game: { stub: true } };
     G.input = createInput(G);
@@ -583,7 +583,7 @@ describe('input: actions and holds (no DOM)', () => {
   });
 });
 
-describe('touch stick, auto-fire and speed scale', () => {
+describe('touch sprint, speed scale and auto-fire', () => {
   const LAYOUT = {
     stick: { x: 150, y: 280, r: 150 }, look: { x: 340, y: 0, w: 460, h: 400 },
     buttons: [

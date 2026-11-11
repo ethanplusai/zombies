@@ -124,7 +124,7 @@ export function placeBox(ctx, spot, yaw) {
   });
 }
 
-// The box on its own (the stand-alone builder), for a stage or a test: { group, setState, update }.
+// The box on its own (the standard builder signature), for a stage or a test: { group, setState, update }.
 export function buildBox(mats) {
   let made = null;
   const ctx = { B: { inZone: (z, fn) => fn(), at: (m, fn) => fn(), tag: (n, fn) => fn(), collide() {}, blob() {} }, stat: () => O, reg: (d) => { made = d; } };

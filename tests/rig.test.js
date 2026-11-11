@@ -24,7 +24,7 @@ describe('reload timing follows the weapon table', () => {
       expect(p.rate * p.total).toBeCloseTo(RIG.CLOCK, 9);
     }
   });
-  it('the pistol keeps the phase 1 event times', () => {
+  it('the pistol keeps the original event times', () => {
     const p = RIG.reloadPlan(W.pistol);
     expect(p.at.magOut).toBeCloseTo(0.22, 9);
     expect(p.at.magIn).toBeCloseTo(1.05, 9);
@@ -137,7 +137,7 @@ describe('pump travel', () => {
   });
 });
 
-describe('anim kit (the phase 1 Spring / key tests)', () => {
+describe('anim kit (the original Spring / key tests)', () => {
   it('key: clamps outside the table, eases inside, writes vectors into out without allocating', () => {
     const k = [[0, 0], [1, 10, 'lin'], [2, 10], [3, 0, 'in']];
     expect(key(k, -1)).toBe(0);

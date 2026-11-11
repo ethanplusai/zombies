@@ -43,7 +43,7 @@ import { buildKnife } from './knife.js';
 import { buildAxe } from './axe.js';
 import { buildThrowProps, throwMats } from './throwProps.js';
 
-// A null builder is a placeholder that its owner has not replaced yet: the pistol stands in.
+// A null builder is a placeholder that has not been replaced yet: the pistol stands in.
 export const MODELS = {
   pistol: buildPistol,
   revolver: buildRevolver,

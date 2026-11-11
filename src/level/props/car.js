@@ -18,7 +18,7 @@ import { createRng } from '../../core/rng.js';
 import { VBuf, panelize, gridNormals, bowl, lensPlate, registerVehicle, setTestVehicles, NEAR, MID, FAR } from './vehicleParts.js';
 
 // L, W, cowlX, rearBaseX, roofF, roofR, hoodF, hoodR, belt, deckY and roofY place the colliders
-// (buildCar) and are phase 1's. The rest is how the type looks: wheelbase, overhang, wheel size and
+// (buildCar) and are the original ones. The rest is how the type looks: wheelbase, overhang, wheel size and
 // ride height, its lamps (lamp: 'quad' twin oblongs | 'rect' | 'round', lampW x lampH), its grille
 // ('slats' | 'crate' | 'bars' | 'slot'), its tail cluster ('wide' | 'tall' | 'wrap'), its bumpers.
 export const CAR_TYPES = {
@@ -355,7 +355,7 @@ function applyDamage(grid, field) {
 }
 
 // ---- the car -----------------------------------------------------------------------------------------
-// Options (phase 1's, all kept): type, paint (a CAR_PAINT key or a hex colour), plate, doorAjar
+// Options (the originals, all kept): type, paint (a CAR_PAINT key or a hex colour), plate, doorAjar
 // (radians, driver's door), dome, head 0..1, tail, hazard, flat 'fl'|'fr'|'rl'|'rr', lightbar,
 // shield, fuelOpen (side), rim, story, far, loft, colour (index, far traffic), doorOpen (far).
 // New: damage 0..1, rust 0..1, dirt 0..1, brokenGlass ['ws','rw','fl','fr','rl','rr'], crushed 0..1,
@@ -1311,7 +1311,7 @@ export function buildCar(B, opts = {}) {
   return handle;
 }
 
-// For other builders (truck.js, highway.js) and for props built from car parts: the geometry of
+// For other builders (truck.js, highway.js) and the garage and clutter props: the geometry of
 // one car at a level of detail, with no level side effects. o as buildCar; returns
 // { body, glass, lit, wheels, plates, lid } (VBufs).
 export function carGeometry(type, opts = {}, lod = MID) {

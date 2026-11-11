@@ -17,7 +17,7 @@ import { meleeTargets } from './melee.js';
 import { createThrowables } from './throwables.js';
 
 const TW = tuning.weapons;
-// The pistol's spread (phase 1's SPREAD), kept as the default for callers that pass no Def.
+// The pistol's spread (the original SPREAD), kept as the default for callers that pass no Def.
 export const SPREAD = TW.classes.pistol.spread;
 export const FIRE_BUFFER = TW.fireBuffer;
 const MOVING_SPEED = TW.movingSpeed;
@@ -226,7 +226,7 @@ export function createWeapon(G, opts = {}) {
     try { view.setVisible(false); } catch (_) { /* ignore */ }
     view = null; weapon.view = null;
   };
-  // The phase 1 view times the pistol's reload only; a view with setWeapon times every one.
+  // The original view times the pistol's reload only; a view with setWeapon times every one.
   const viewTimed = () => !!(view && view.events) && (cur().id === 'pistol' || typeof view.setWeapon === 'function');
 
   // ---- loadout
@@ -425,7 +425,7 @@ export function createWeapon(G, opts = {}) {
       else if (e.type === 'reload') { magIn = false; shellIn = false; emit('weapon:reload', { weapon: cur().id }); viewCall((w) => w.play('reload')); }
       else if (e.type === 'ammo') { viewCall((w) => w.setRounds(cur().mag)); checkAmmo(L.slot); }
       else if (e.type === 'reloadCancel') {
-        // The phase 1 view has no cancel: a draw replaces its reload timeline (so its magIn never fires).
+        // The original view has no cancel: a draw replaces its reload timeline (so its magIn never fires).
         viewCall((w) => w.play('draw'));
         viewCall((w) => w.setRounds(cur().mag));
       }

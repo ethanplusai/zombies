@@ -4,7 +4,7 @@
 // what to ask it for is decided by the pure planners in src/fx/blood.js.
 //
 // Nothing in the boot order knows this module, so the animator installs it the first time one is
-// made (ensureGore): it finds G on the harness global, as body.js does. The level setup may instead call
+// made (ensureGore): it finds G on the harness global, as body.js does. createLevel may instead call
 // createGore(G) from main.js after the zombies and the ui exist; both are safe together.
 //
 // Every effect reads G.fx.gore (1 full, 0.3 reduced) at the moment it fires.

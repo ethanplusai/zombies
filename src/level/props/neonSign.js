@@ -38,7 +38,7 @@ export function placeGarageSign(A, O, power) {
   return { pos: [44.6, 7.4, 12], h };
 }
 
-// Power across the rest of the map. The forecourt was built lit (phase 1), so the switch has to add
+// Power across the rest of the map. The forecourt was built lit, so the switch has to add
 // to it: a run of hot neon under the canopy's fascia all the way round, a TRUCK STOP topper and a
 // neon border on the price sign, OPEN over the store's door side of the canopy, and coloured light
 // from each on the wet ground. The diner's and the motel's own signs are their zones' (they already

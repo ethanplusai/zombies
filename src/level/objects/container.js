@@ -1,5 +1,5 @@
 // Searchable containers that are not vehicles. Barrels, crates, bins, suitcases and
-// dressers are in props/kitchen.js (buildStandIn: each already leaves its lid, drawer or case
+// dressers are built by buildStandIn in props/kitchen.js: each already leaves its lid, drawer or case
 // open once searched); this adds the garage's own: the steel locker (its door hangs open on what was
 // in it) and the tool chest (two drawers left out). All are drawn in the area's art mesh and move
 // through A.movable, so `searched` shows for the rest of the game and resets with the level.

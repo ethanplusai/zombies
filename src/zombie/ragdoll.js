@@ -55,7 +55,7 @@ export function createRagdoll() {
   let t = 0, acc = 0, still = 0, pin = 0, settled = false;
   const pinP = new Float32Array(6);
   // per fall: when the wind-down begins (a thrown body is still in the air at 1.2 s), how slack the
-  // knees and elbows are (1 = the phase 1 spring toward straight, 0 = none), the body's size (the
+  // knees and elbows are (1 = the original spring toward straight, 0 = none), the body's size (the
   // brute's radii), and the floor under each point (model space; 0 = the plane the root stands on)
   let calm = 1.2, slack = 1, size = 1, stepN = 0;
   const g = new Float32Array(N);

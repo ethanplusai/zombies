@@ -1,7 +1,7 @@
 // G.zombies: owns the pool of zombie bodies and their animators, and drives the pure crowd AI in
 // ai.js. Bodies are built once at load (live cap + corpse cap, specials included: types.js poolPlan)
-// and reused; the body and animator are a black box behind the API documented by buildZombie
-// and the original body.
+// and reused; the body and animator are a black box behind the API documented in task-10-report.md
+// (the original) and buildZombie.
 //
 //   list       live zombie records { id, pos:{x,y,z}, state, health, maxHealth, type, alive, speed,
 //              layer, crawling, limbs:{head,armL,armR,legL,legR}, lured }
@@ -159,7 +159,7 @@ export function createZombies(G, deps = {}) {
     if (cols !== obstacleSrc || cols.length !== obstacleLen) { obstacles = createObstacles(cols); obstacleSrc = cols; obstacleLen = cols.length; }
     return obstacles;
   }
-  // spawn points in zones the player can reach through open doors (phase 1 levels: all of them)
+  // spawn points in zones the player can reach through open doors (original levels: all of them)
   const spawnPoints = () => {
     const L = G.level;
     if (!L) return [];
@@ -849,7 +849,27 @@ export function createZombies(G, deps = {}) {
     let cd = 0;
     if (z && G.camera) cd = Math.hypot(crowd.x[i] - G.camera.position.x, crowd.z[i] - G.camera.position.z);
     if (z && z.setLod) z.setLod(cd > lodFar ? 1 : 0);
+    if (z) foldPrepass(z, cd > lodFar && !(G.quality && G.quality.depthPrepass === false));
     a.update(dt, speed, cd);
+  }
+  // The depth pre-pass twin (body.js, zmats.js) lays a body's depth before its costly program runs with
+  // depth writes off. A far body's mesh is one layer deep and a few hundred pixels: there the twin is
+  // left out and the body writes its own depth (one skinned draw instead of two, the same pixels).
+  // A near body keeps it on every tier: its garments lie a hair over the skin, and without the twin
+  // the layers fight for the pixel (seen as speckle on the mobile shots). Not on a tier without
+  // pre-passes (mobile): the post chain lists the twins whose body writes depth and hides them, from a
+  // list it rebuilds every few seconds, so a body turning near again would lose its twin until then.
+  // Draw flags only, switched when the state changes.
+  function foldPrepass(z, fold) {
+    if (z.prepassFolded === fold) return;
+    const mat = z.materials && z.materials.char;
+    const ch = z.mesh && z.mesh.children;
+    let pre = null;
+    if (ch) for (let k = 0; k < ch.length; k++) if (ch[k].name === 'zombie:depth') pre = ch[k];
+    if (!pre || !mat) { z.prepassFolded = fold; return; }
+    pre.visible = !fold;
+    mat.depthWrite = fold;
+    z.prepassFolded = fold;
   }
 
   function updateCorpses(dt) {

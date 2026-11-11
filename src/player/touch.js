@@ -27,7 +27,7 @@ const NO_BUTTONS = [];
 
 // How a weapon's trigger works, from its Def: 'auto' (fires while held), 'burst' (one burst a press)
 // or 'semi' (one shot a press: pistols, revolvers, pump and other manually cycled guns, specials).
-// Reads `fireMode`, then `burst` (> 0), then `auto`, then the phase 1 `semiAuto`. No def: 'semi'.
+// Reads `fireMode`, then `burst` (> 0), then `auto`, then the original `semiAuto`. No def: 'semi'.
 export function fireModeOf(def) {
   if (!def) return 'semi';
   if (def.fireMode === 'auto' || def.fireMode === 'semi' || def.fireMode === 'burst') return def.fireMode;

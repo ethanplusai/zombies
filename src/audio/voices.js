@@ -1,7 +1,7 @@
 // Zombie voices and bodies by type: runner screams and panting, the armoured one muffled
 // behind its mask with gear rattling, the bloater wet and gurgling (and the swell before it bursts),
 // the brute's low roar, growl, footfalls and slam, the crawler's drag; severing; boards torn and
-// hammered back; a body climbing through a window. Walkers keep the phase 1 voices in sfx.js.
+// hammered back; a body climbing through a window. Walkers keep the original voices in sfx.js.
 import {
   samples, white, filt, sweep, noise, envAD, mixInto, normalize, saturate, fadeEdges, dcBlock,
   modal, chirp, grain, bubble, voice, VOWELS, lerpVowel, wobble, loopify, click, friction,
@@ -260,7 +260,7 @@ export const VOICE_SFX = {
   window_climb: { variants: 2, gen: (sr, rng) => windowClimb(sr, rng) },
 };
 
-// Which voice a zombie type uses for each moment (walker: the phase 1 sounds).
+// Which voice a zombie type uses for each moment (walker: the original sounds).
 export const TYPE_VOICE = {
   walker: { idle: 'zombie_groan', attack: 'zombie_snarl', spawn: 'zombie_groan' },
   runner: { idle: 'runner_pant', attack: 'runner_scream', spawn: 'runner_scream' },

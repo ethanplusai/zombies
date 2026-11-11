@@ -49,11 +49,11 @@ export function createPurchases({ economy, weapon, emit = () => {}, level = () =
     if (!w || !w.ammo || typeof w.addReserve !== 'function') return refuse('unavailable');
     const s = typeof w.has === 'function' ? slotOf(w, id) : null;
     if (typeof w.has === 'function' && !s) return refuse('unavailable');
-    // a phase 1 stand-in weapon (no slots): the held weapon at the pistol's max
+    // an original stand-in weapon (no slots): the held weapon at the pistol's max
     const max = s ? statsFor(s).maxReserve : tuning.pistol.maxReserve;
     const have = s ? s.reserve : w.ammo.reserve;
     if (have >= max) return refuse('full');
-    // the store's price is its own (phase 1's 250); a wall buy's is the weapon table's
+    // the store's price is its own (the original 250); a wall buy's is the weapon table's
     const cost = s && s.upgraded ? TE.upgradedAmmo : it.kind === 'wallAmmo' && it.cost != null ? it.cost : ammoCost(w, id);
     if (!economy.spend(cost, 'wallAmmo', it.id)) return refuse('points');
     if (s) w.addReserve(undefined, id); else w.addReserve(max - have);
@@ -100,7 +100,7 @@ export function createPurchases({ economy, weapon, emit = () => {}, level = () =
     pickup(it) { return loot ? loot.take(it) : refuse('unavailable'); },
     search: () => refuse('hold'),
     boards: () => refuse('hold'),
-    lockedDoor: () => refuse('locked'), // a door that never opens (the first version's)
+    lockedDoor: () => refuse('locked'), // a door that never opens (an early greybox's)
   };
 
   const p = {

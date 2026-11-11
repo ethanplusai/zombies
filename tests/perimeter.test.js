@@ -247,7 +247,7 @@ describe('the perimeter', () => {
 
   it('no invisible wall: drawn triangles lie within 0.5 m of every face of every collider', () => {
     const bad = uncovered(world.colliders, drawn);
-    // Known, not covered here: the pallet barricade by the diner front (props/clutter.js) has
+    // Known and out of scope here: the pallet barricade by the diner front (props/clutter.js) has
     // a collider whose west top corner stands 0.6 m from its leaning pallets. Listed so that fixing it
     // makes this test say so.
     const KNOWN = [/^drawn \(forecourt\) 10\.59,0\.00,-16\.62\.\.11\.07,1\.05,-16\.05:/];

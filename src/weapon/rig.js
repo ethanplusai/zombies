@@ -58,7 +58,7 @@ export function animFor(name, def = {}, action = 'slide') {
 }
 
 // ---- timing ---------------------------------------------------------------------------------------
-// Draw times by class are gameplay numbers: tuning.weapons.drawTime when the weapon table's owner
+// Draw times by class are gameplay numbers: tuning.weapons.drawTime when the weapon table
 // defines it; these are the values it should carry (and what is used until it does).
 const DRAW = { pistol: 0.5, revolver: 0.5, smg: 0.5, shotgun: 0.6, rifle: 0.6, lmg: 0.8, special: 0.6, ...((tuning.weapons && tuning.weapons.drawTime) || null) };
 export const FIXED = { empty: 0.06, inspect: 3.6, swing: 0.7, throw: 0.8 };
@@ -227,7 +227,7 @@ export function clipFor(def, over) {
 
 // ---- small additive clips -----------------------------------------------------------------------
 // { pos, rot }: keyframes on 0..1 of the clip, added to the held pose (metres; pitch, yaw, roll).
-// swing: the gun is pulled aside and down while the off hand strikes (the blade is drawn by the melee view).
+// swing: the gun is pulled aside and down while the off hand strikes (the melee blade is drawn elsewhere).
 // throw: the gun drops to the right while the support hand comes up and through.
 export const SWING = {
   pos: [[0, [0, 0, 0]], [0.12, [0.09, -0.08, 0.05], 'out'], [0.6, [0.09, -0.09, 0.05]], [1, [0, 0, 0], 'io']],

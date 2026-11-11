@@ -1,11 +1,10 @@
-// Zombie types, round scaling and limb loss. The design's numbers where it gives them
-// (walker, health curve, 24 alive, a boss every fifth round, types and the rounds they enter), plan
-// decisions otherwise. Read by src/game/rounds.js (the director) and src/zombie/{types,manager}.js.
+// Zombie types, round scaling and limb loss. The core numbers (walker, health curve, 24 alive, a boss every fifth round,
+// types and the rounds they enter) first, then the tuning choices. Read by src/game/rounds.js (the director) and src/zombie/{types,manager}.js.
 import { core } from './core.js';
 
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
 
-// Walker health: the original +100 a round to round 9, then
+// Walker health (a balance choice): the original +100 a round to round 9, then
 // x1.1 a round to round 20 (2710 at 20), then only x1.05 a round so late rounds do not become a grind
 // (4415 at 30, 7192 at 40). tuning.walker.health is this function (the frag and molotov scale with it).
 const health = (n) => {
@@ -15,11 +14,11 @@ const health = (n) => {
 };
 const walker = { ...core.walker, health };
 
-// The round's numbers. `total`, `maxAlive`, `spawnInterval` and `lull` keep phase 1's shape
+// The round's numbers. `total`, `maxAlive`, `spawnInterval` and `lull` keep the original shape
 // (tuning.round is an alias of this object).
 const round = {
   // 6 + 4n to round 10 (46), then faster: 46 + 6(n-10) + 0.5(n-10)^2 (53 at 11, 89 at 15, 156 at 20);
-  // after round 20 only +10 a round (166 at 21, 256 at 30, 356 at 40: no grind)
+  // after round 20 only +10 a round (166 at 21, 256 at 30, 356 at 40: a balance choice, no grind)
   total: (n) => (n <= 10 ? 6 + 4 * n : n <= 20 ? Math.round(46 + 6 * (n - 10) + 0.5 * (n - 10) ** 2) : 156 + 10 * (n - 20)),
   maxAlive: 24,
   spawnInterval: core.round.spawnInterval,
@@ -39,8 +38,8 @@ const round = {
   },
 };
 
-// Shares of a round's ordinary spawns (the rest are walkers). Values follow the design's schedule,
-// with: runners +0.07 a round from round 4 (0.35 at 8, 0.7 from
+// Shares of a round's ordinary spawns (the rest are walkers). Tuned on the type schedule,
+// with these balance choices: runners +0.07 a round from round 4 (0.35 at 8, 0.7 from
 // 13); walkers never under `walkerFloor` of the ordinary spawns (where runners + armoured + bloaters
 // would pass 0.85, rounds.mix scales the three down together, keeping their proportions: from round 12).
 const mix = {
@@ -51,7 +50,7 @@ const mix = {
   walkerFloor: 0.15,
 };
 
-// The last zombies of a round (balance choice): once everything has spawned and at most `count`
+// The last zombies of a round (a balance choice): once everything has spawned and at most `count`
 // are left for `after` s, each is announced (round:straggler, again every `every` s) and the walking
 // ones move `speed` x faster; a crawler left that long for `crawlerAfter` s is moved to a breach out of
 // view nearer the player.
@@ -75,7 +74,7 @@ const types = {
   // hitting everything within `radius` m; staggered only by explosions and shotgun blasts within
   // `shotgunStagger` m; One-Tap does not kill it
   // health: x walker health at round 5; `healthByRound` [round, x] points, linear between them and flat
-  // outside (12x at 5, 8x at 10, 6x from 15)
+  // outside (a balance choice: 12x at 5, 8x at 10, 6x from 15)
   brute: { health: 12, healthByRound: [[5, 12], [10, 8], [15, 6]], speed: [2.2, 2.2], attack: 60, reach: 1.6, windup: 0.6, cooldown: 1.4, gait: 'run',
     slam: { every: 6, radius: 2.5, damage: 40, windup: 0.6 }, shotgunStagger: 4, oneTapImmune: true, stagger: 0.8 },
 };
@@ -105,7 +104,7 @@ function healthScale(type, n) {
 
 export const zombies = {
   healthScale,
-  walker, // phase 1's walker with the health curve above (tuning.walker is an alias)
+  walker, // the original walker with the health curve above (tuning.walker is an alias)
   round,
   mix,
   straggler,

@@ -10,7 +10,7 @@
 // Spread values are cone half-angles in degrees; recoil is radians per shot (positive pitch looks up).
 
 // ---------------------------------------------------------------- spread and recoil by class
-// The pistol's numbers are phase 1's (they were SPREAD / RECOIL at the top of firing.js).
+// The pistol's numbers are the original ones (they were SPREAD / RECOIL at the top of firing.js).
 const classes = {
   pistol: {
     spread: { ads: 0.15, hip: 1.2, move: 1.0, air: 2.0, bloom: 0.3, bloomMax: 0.9, bloomRecover: 0.25 },
@@ -155,7 +155,7 @@ const attachments = {
 export const weapons = {
   table,
   ids: Object.keys(table),
-  pistol: table.pistol, // phase 1 alias (tuning.pistol)
+  pistol: table.pistol, // original alias (tuning.pistol)
   classes,
   upgrade,
   melee,

@@ -41,9 +41,9 @@ export function attackDamage(type, crawling, armsMissing) {
   return base * Z.limbs.armScale ** (armsMissing || 0);
 }
 
-// Animator states. Further states: run, crawl, slam, window, tear and burst and lists them in
+// Animator states. The animator adds run, crawl, slam, window, tear and burst and lists them in
 // `animator.states`; until then (no list, or the state is not in it) each falls back to the nearest
-// phase 1 state.
+// original state.
 export const BASE_STATES = ['idle', 'walk', 'attack', 'stagger', 'climb', 'dead'];
 const FALLBACK = { run: 'walk', crawl: 'walk', slam: 'attack', tear: 'attack', window: 'climb', burst: 'attack' };
 export function animState(animator, want) {

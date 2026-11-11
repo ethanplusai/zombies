@@ -260,7 +260,7 @@ describe('touch machine: buttons', () => {
   });
 });
 
-describe('machine', () => {
+describe('touch machine: zones, cancelling and sprint', () => {
   it('a rectangle stick zone anchors the stick under the finger anywhere inside it', () => {
     const m = createTouchMachine({ width: 800, stick: { x: 0, y: 100, w: 336, h: 300 }, look: { x: 336, y: 0, w: 464, h: 400 }, buttons: [] }, T);
     m.down(1, 300, 380, 0);
@@ -300,7 +300,7 @@ describe('machine', () => {
   });
 });
 
-describe('DOM binding', () => {
+describe('touch machine: DOM binding', () => {
   const fakeTarget = () => {
     const l = {};
     return { l, addEventListener(t, f) { (l[t] ||= []).push(f); }, removeEventListener() {}, fire(t, e) { for (const f of l[t] || []) f(e); } };

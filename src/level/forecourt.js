@@ -5,7 +5,7 @@
 // (registerLights) and exposes the level contract as G.level.
 import {
   Mesh, MeshStandardMaterial, MeshLambertMaterial, MeshBasicMaterial, Color, DoubleSide, CanvasTexture, RepeatWrapping,
-  LinearMipmapLinearFilter, LinearFilter, Group, PlaneGeometry, Vector3,
+  LinearMipmapLinearFilter, LinearFilter, Group, PlaneGeometry, Vector3, BufferGeometry, BufferAttribute,
   DataTexture, RGBAFormat, RGFormat, RedFormat, UnsignedByteType, ClampToEdgeWrapping,
 } from 'three';
 import { createBuilder, M, box, boxUp, rgb, cylUp, quadUV } from './build.js';
@@ -431,6 +431,9 @@ function makeMaterials(G, atlas, decals) {
     concreteKerb: m.concrete({ color: 0x8a877f, age: 0.6, paint: 0xc9a416, paintWear: 0.6 }),
     wallStore: m.concrete({ color: 0x9a968a, panel: [0.4, 0.2], paint: 0xcabfa2, paintWear: 0.32, age: 0.55, shelter: 0.25 }),
     paintCanopy: paint(0xd6d4cb, { wear: 0.12, rust: 0.35, dirt: 0.5, roughness: 0.42, shelter: 0.5 }),
+    // every painted metal in one draw (see foldBuckets). Made here, among the paints: three draws
+    // opaque meshes of one render order by material id, so the fold keeps the paints' place in that order
+    paintFold: paintFoldMaterial(m),
     paintTeal: paint(0x0c7f79, { wear: 0.3, shelter: 0.3 }),
     paintPump: paint(0xcfcdc3, { wear: 0.3, dirt: 0.55, shelter: 0.85 }),
     paintYellow: paint(0xd7a50d, { wear: 0.42, rust: 0.5 }),
@@ -460,6 +463,7 @@ function makeMaterials(G, atlas, decals) {
     vcTerrain: std({ roughness: 0.96 }),
     uvFoliage: foliageMaterial(createFoliageTexture(G.rng.fork('foliage'))),
     vcGlow: glow({ vertexColors: true }),
+    glowFold: glowFoldMaterial(), // every plain glow in one draw (see foldBuckets), in the static glow's place in the draw order
     vcFar: glow({ color: new Color(0.0035, 0.0048, 0.006) }),
     atlasLit: new MeshStandardMaterial({ map: atlas.texture, alphaTest: 0.25, alphaToCoverage: true, roughness: 0.65, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
     atlasGlowVc: glow({ map: atlas.texture, vertexColors: true }),
@@ -478,10 +482,134 @@ function makeMaterials(G, atlas, decals) {
   };
 }
 
+// ---- folded buckets ------------------------------------------------------------------------------
+// One bucket is one draw call. The plain glows (the static vcGlow, the hazard blinkers and beacon,
+// the lamp faces that follow a fixture's flicker, the OPEN sign's buzz) differ only in a colour
+// that update() rewrites each frame, and the painted metals only in their paint's uniforms. So each
+// family is drawn as one mesh: the glows with a per-vertex group index into an array of those very
+// colours (the trick mats/interior.js uses for its light groups), the paints with their colour,
+// wear, rust, roughness, dirt and shelter carried per vertex. Same pixels, one draw each, in the
+// main view and in the puddle reflection.
+const GLOW_KEYS = ['vcGlow', 'blinkA', 'blinkB', 'blinkC', 'blinkD', 'flickA', 'flickB', 'flickC', 'flickD', 'flickE', 'vcBuzz'];
+const PAINT_KEYS = ['paintGalv', 'paintCanopy', 'paintTeal', 'paintPump', 'paintYellow', 'paintDiner', 'paintDumpster', 'paintDoor', 'paintDrum',
+  'paintCarA', 'paintCarB', 'paintCarC', 'paintCarD', 'paintCarE', 'paintCarF', 'paintTruck', 'paintTrailer'];
+const WHITE = new Color(1, 1, 1);
+
+function glowFoldMaterial() {
+  const mat = new MeshBasicMaterial({ vertexColors: true, toneMapped: false, fog: false });
+  const gains = { value: GLOW_KEYS.map(() => WHITE) }; // filled with the live colours by bindGlowFold
+  mat.userData.gains = gains;
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uGlow = gains;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\nattribute float aGlow;\nuniform vec3 uGlow[${GLOW_KEYS.length}];\nvarying vec3 vGlowGain;`)
+      .replace('#include <color_vertex>', '#include <color_vertex>\nvGlowGain = uGlow[int(aGlow + 0.5)];');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vGlowGain;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= vGlowGain;');
+  };
+  mat.customProgramCacheKey = () => 'level:glowFold';
+  return mat;
+}
+// the folded glow reads the very Color objects update() writes (a group's material colour times its
+// vertex colour, as the separate buckets drew it; the static glow's group is plain white)
+function bindGlowFold(mats) {
+  const g = mats.glowFold.userData.gains;
+  g.value = GLOW_KEYS.map((k) => (k === 'vcGlow' ? WHITE : mats[k].color));
+}
+
+function paintFoldMaterial(m) {
+  const mat = m.paintedMetal({ color: 0xffffff });
+  const base = mat.onBeforeCompile;
+  const PER_VERTEX = [['vec3', 'uPColor', 'aPColor'], ['float', 'uPWear', 'aPWear'], ['float', 'uPRust', 'aPRust'], ['float', 'uPRough', 'aPRough'], ['float', 'uPDirt', 'aPDirt'], ['float', 'uShelter', 'aPShelter']];
+  mat.onBeforeCompile = (shader, renderer) => {
+    base(shader, renderer);
+    let v = shader.vertexShader, f = shader.fragmentShader;
+    const decl = PER_VERTEX.map(([t, u, a]) => `attribute ${t} ${a};\nvarying ${t} v${a};`).join('\n');
+    const copy = PER_VERTEX.map(([, , a]) => `v${a} = ${a};`).join('\n');
+    v = v.replace('#include <common>', `#include <common>\n${decl}`).replace('#include <project_vertex>', `#include <project_vertex>\n${copy}`);
+    for (const [t, u, a] of PER_VERTEX) {
+      const was = `uniform ${t} ${u};`;
+      if (!f.includes(was)) throw new Error(`level: paintFold cannot find "${was}" in the paint program`);
+      f = f.replace(was, `varying ${t} v${a};\n#define ${u} v${a}`);
+    }
+    shader.vertexShader = v; shader.fragmentShader = f;
+  };
+  mat.customProgramCacheKey = () => 'surf:paintedMetal:fold';
+  return mat;
+}
+
+// A zone's buckets with the glow and paint families each merged into one geometry (keys 'glowFold'
+// and 'paintFold') carrying what tells its members apart. A family with one member is folded too
+// (it costs nothing and keeps one program per family). Returns a new Map; the inputs are disposed.
+function foldBuckets(geos, mats) {
+  const out = new Map();
+  const glow = [], paint = [];
+  for (const [key, geo] of geos) {
+    if (GLOW_KEYS.includes(key)) glow.push([key, geo]);
+    else if (PAINT_KEYS.includes(key) && mats[key] && mats[key].surf) paint.push([key, geo]);
+    else out.set(key, geo);
+  }
+  // within a fold the members go in the order three drew them as separate meshes (material id), so a
+  // face that met another family member face-on comes out the same way round
+  const byId = (p, q) => mats[p[0]].id - mats[q[0]].id;
+  glow.sort(byId); paint.sort(byId);
+  if (glow.length) {
+    out.set('glowFold', mergeFamily(glow, (key, n) => {
+      const col = new Float32Array(n * 3).fill(1), grp = new Float32Array(n).fill(GLOW_KEYS.indexOf(key));
+      return { aGlow: new BufferAttribute(grp, 1), ...(n ? { color: new BufferAttribute(col, 3) } : {}) };
+    }, (geo) => geo.getAttribute('color')));
+  }
+  if (paint.length) {
+    out.set('paintFold', mergeFamily(paint, (key, n) => {
+      const u = mats[key].surf;
+      const fill = (size, vals) => { const a = new Float32Array(n * size); for (let i = 0; i < n; i++) for (let k = 0; k < size; k++) a[i * size + k] = vals[k]; return new BufferAttribute(a, size); };
+      const c = u.uPColor.value;
+      return { aPColor: fill(3, [c.r, c.g, c.b]), aPWear: fill(1, [u.uPWear.value]), aPRust: fill(1, [u.uPRust.value]), aPRough: fill(1, [u.uPRough.value]), aPDirt: fill(1, [u.uPDirt.value]), aPShelter: fill(1, [u.uShelter.value]) };
+    }));
+  }
+  return out;
+}
+// Merge [key, geometry] pairs (indexed, position + normal at least) into one indexed geometry, with
+// per-member attributes from attrs(key, vertexCount); keepColor(geo) returns a member's own colour
+// attribute to use in place of the default one attrs made.
+function mergeFamily(list, attrs, keepColor = () => null) {
+  let nv = 0, ni = 0;
+  for (const [, g] of list) { nv += g.getAttribute('position').count; ni += g.index.count; }
+  const pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3);
+  const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+  const extra = {};
+  let v = 0, i = 0;
+  for (const [key, g] of list) {
+    const n = g.getAttribute('position').count;
+    pos.set(g.getAttribute('position').array, v * 3);
+    nrm.set(g.getAttribute('normal').array, v * 3);
+    const ix = g.index.array;
+    for (let k = 0; k < ix.length; k++) idx[i + k] = ix[k] + v;
+    const a = attrs(key, n);
+    const own = keepColor(g);
+    if (own) a.color = own;
+    for (const [name, attr] of Object.entries(a)) {
+      if (!extra[name]) extra[name] = new Float32Array(nv * attr.itemSize);
+      extra[name].set(attr.array, v * attr.itemSize);
+    }
+    v += n; i += ix.length;
+    g.dispose();
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute('position', new BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new BufferAttribute(nrm, 3));
+  for (const [name, arr] of Object.entries(extra)) geo.setAttribute(name, new BufferAttribute(arr, arr.length / nv));
+  geo.setIndex(new BufferAttribute(idx, 1));
+  geo.computeBoundingSphere();
+  geo.computeBoundingBox();
+  return geo;
+}
+
 const TRANSPARENT = new Set(['glassCar', 'glassStore']);
 // What the puddle reflection draws: the cheap stand-ins (vcRefl: cars, lorry, pumps, canopy deck,
 // store shell, tree spires as plain lit boxes) and everything that emits light. Nothing else.
-const REFLECT = /^(vcRefl|vcGlow|vcBuzz|atlasGlow|blink|flick|vcFar)/;
+const REFLECT = /^(vcRefl|vcGlow|vcBuzz|atlasGlow|blink|flick|vcFar|glowFold)/;
 const HIDE = [1, -1]; // a draw range three skips before it issues a draw call
 // Is this draw the puddle reflection's mirrored view? Asked by the stand-ins, which are drawn in
 // that view only. Three answers, strongest first, so no one convention has to hold:
@@ -593,6 +721,7 @@ function registerLights(G, fixtures) {
 // shadows, reflection stand-ins, the shadow proxy hidden from the main view). Returns { meshes }.
 export function meshesFor(G, geos, mats, group) {
   const meshes = {};
+  if (mats.glowFold && mats.paintFold) { geos = foldBuckets(geos, mats); bindGlowFold(mats); }
   for (const [key, geo] of geos) {
     const mat = mats[key];
     if (!mat) throw new Error(`level: no material for bucket "${key}"`);
@@ -600,7 +729,7 @@ export function meshesFor(G, geos, mats, group) {
     mesh.name = key;
     mesh.castShadow = key === 'shadow';
     mesh.receiveShadow = key !== 'shadow' && key !== 'depth' && !key.includes('Glow') && key !== 'vcFar' && key !== 'uvBlob' && key !== 'vcRefl';
-    mesh.frustumCulled = false; // each bucket spans the whole level
+    mesh.frustumCulled = true; // three's own test on the bucket's bounds: most span the level and are always drawn, a zone's or a local one's are not
     if (TRANSPARENT.has(key)) mesh.renderOrder = 10;
     if (key === 'uvBlob') mesh.renderOrder = 6; // after the light pools (5), so it also darkens ground lit by pool-only lamps
     if (key === 'atlasLit' || key === 'uvFence' || key === 'uvFoliage') mesh.renderOrder = 2;

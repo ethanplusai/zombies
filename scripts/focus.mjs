@@ -1,4 +1,4 @@
-// npm run focus: the conditions a player will hit that nothing else exercises (focus cases).
+// npm run focus: the conditions a player will hit that nothing else exercises.
 // Each case loads the built game in its own page, breaks one thing and checks the game copes.
 //   1 pointer lock denied -> drag-look with a notice, still playable
 //   2 a long stall (hidden tab) -> dt clamped: nobody teleports, nobody dies of it; lock loss pauses

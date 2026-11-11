@@ -33,7 +33,7 @@ export const bounds = { min: [-34, -2, -52], max: [74, 16, 34] };
 
 // ---- zones --------------------------------------------------------------------------------------
 // rects split at the middle of each doorway, so a body is in one zone or the other, never neither.
-// reverb names (open, canopy, diner, kitchen, motelRoom, walkway, garage, scrapyard).
+// reverb names the audio engine knows: open, canopy, diner, kitchen, motelRoom, walkway, garage, scrapyard.
 export const zones = {
   forecourt: {
     floor: 'asphalt', reverb: 'open',
@@ -343,7 +343,7 @@ export function insidePolygon(x, z) {
 }
 
 // ---- spawn points: each stands outside its breach and climbs, squeezes or crawls in -------------
-// kind 'fence' keeps the phase 1 climb-in (manager.js); breach says what it climbs through; top is
+// kind 'fence' keeps the original climb-in (manager.js); breach says what it climbs through; top is
 // the height it goes over (or under); to is where it lands inside.
 const sp = (id, zone, breach, pos, to, top, extra) => ({ id, zone, kind: 'fence', breach, pos, to, top, segment: perimeter.find((s) => s.breach === id).id, ...extra });
 export const spawnPoints = [
@@ -374,7 +374,7 @@ export const machineSpots = [
   { id: 'shortOrder', zone: 'motel', pos: [28.0, 0, -37.55], yaw: 0 },
   { id: 'longHaul', zone: 'garage', pos: [57.5, 0, 3.55], yaw: 0 },
 ];
-// weapon ids are lower-cased names (the weapon table maps them to its defs)
+// weapon ids are this layout's names, lower-cased (the weapon table maps them to its defs)
 export const wallBuys = [
   { id: 'wall-hollis12', zone: 'forecourt', weapon: 'hollis12', pos: [-12, 1.4, -19.5], yaw: 0 },
   { id: 'wall-pike45', zone: 'diner', weapon: 'pike45', pos: [7.32, 1.4, -26.0], yaw: -Math.PI / 2 },
@@ -390,7 +390,7 @@ export const benchSpot = { id: 'bench', zone: 'garage', pos: [55, 0, 12.0], yaw:
 
 // ---- searchables (46): fixed, never random ------------------------------------------------------
 // pos: where the hand goes (the boot of a car, a lid, a drawer front), outside the prop's collider;
-// prop: which drawn prop it is (the prop modules bind setState / setSearched to it).
+// prop: which drawn prop it is (the object builders bind setState / setSearched to it).
 const boot = (v, L) => {
   const nx = Math.cos(v.yaw), nz = -Math.sin(v.yaw);
   return [+(v.x - nx * (L / 2 + 0.9)).toFixed(3), 0.9, +(v.z - nz * (L / 2 + 0.9)).toFixed(3)];
@@ -497,6 +497,45 @@ export const areas = [
   { name: 'kitchen', min: [20.3, 0, -31.7], max: [26.3, 3.55, -20.3] },
   ...rooms.map((r) => ({ name: 'motelRoom', id: r.id, min: r.wing === 'n' ? [r.a0, r.floor ? UP : 0, -43.7] : [60.3, r.floor ? UP : 0, r.a0], max: r.wing === 'n' ? [r.a1, r.floor ? 6.0 : 2.84, -38.3] : [65.7, r.floor ? 6.0 : 2.84, r.a1] })),
   { name: 'garage', min: [46.3, 0, 4.3], max: [65.7, 6.2, 19.7] },
+];
+
+// ---- enclosed cells (what world.js culls by portal) ----------------------------------------------
+// A room with walls and a ceiling: from inside it nothing beyond can be seen except through its
+// openings. box: the room's inside (min, max); portals: every opening in its walls, shut doors and
+// boarded windows included (their barriers and boards have gaps, and the jambs behind them show),
+// as world boxes { min, max }. Seen from inside the box, a mesh outside it is drawn only if it shows
+// through one of these openings (world.js createPortalCull).
+const opening = (x0, y0, z0, x1, y1, z1) => ({ min: [x0, y0, z0], max: [x1, y1, z1] });
+const doorById = (id) => doors.find((d) => d.id === id);
+const doorOpening = (id) => { const d = doorById(id); return opening(d.rect.x0, 0, d.rect.z0, d.rect.x1, d.h, d.rect.z1); };
+const windowOpening = (w, y0 = 0) => (w.normal[0] === 0
+  ? opening(w.pos[0] - w.w / 2, y0 + w.sill, w.pos[2] - 0.2, w.pos[0] + w.w / 2, y0 + w.head, w.pos[2] + 0.2)
+  : opening(w.pos[0] - 0.2, y0 + w.sill, w.pos[2] - w.w / 2, w.pos[0] + 0.2, y0 + w.head, w.pos[2] + w.w / 2));
+export const cells = [
+  {
+    id: 'diner', zone: 'diner', box: { min: [DIN.x0 + WALL, -0.5, DIN.zb + WALL], max: [DIN.x1 - WALL, 3.55, DIN.zf] },
+    portals: [doorOpening('d1'), doorOpening('d2'), ...windows.filter((w) => w.zone === 'diner').map((w) => windowOpening(w))],
+  },
+  ...rooms.map((r) => {
+    const y0 = r.floor ? UP : 0, y1 = r.floor ? ROOF - 0.3 : UP - SLAB;
+    const win = r.window ? windows.find((w) => w.id === r.window) : null;
+    const n = r.wing === 'n';
+    return {
+      id: `room-${r.id}`, zone: 'motel',
+      box: n ? { min: [r.a0, y0 - 0.5, NW.back + WALL], max: [r.a1, y1, NW.front - WALL] } : { min: [EW.front + WALL, y0 - 0.5, r.a0], max: [EW.back - WALL, y1, r.a1] },
+      portals: [
+        n ? opening(r.door[0], y0, NW.front - WALL, r.door[1], y0 + 2.1, NW.front) : opening(EW.front, y0, r.door[0], EW.front + WALL, y0 + 2.1, r.door[1]),
+        ...(win ? [windowOpening(win, y0)] : []),
+      ],
+    };
+  }),
+  {
+    id: 'bays', zone: 'garage', box: { min: [BAY.x0 + WALL, -0.5, BAY.z0 + WALL], max: [BAY.x1 - WALL, BAY.h, BAY.z1 - WALL] },
+    portals: [
+      ...[5.0, 10.2, 15.4].map((a) => opening(BAY.x0, 0, a, BAY.x0 + WALL, 4.2, a + 3.6)),
+      ...rollers.filter((r) => r.gap > 0).map((r) => opening(BAY.x1 - WALL, 0, r.z0, BAY.x1, r.gap, r.z1)),
+    ],
+  },
 ];
 
 // the player starts in each zone here (zone=<name> harness param)

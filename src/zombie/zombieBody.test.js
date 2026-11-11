@@ -12,7 +12,7 @@ import { climbKeys, buildClip, clipAt } from './animClips.js';
 import { createRagdoll, R } from './ragdoll.js';
 import { createRng } from '../core/rng.js';
 
-// the animator, the ragdoll and the gore module all index bones by these names in this order
+// the animator, the ragdoll and the gore task all index bones by these names in this order
 const BONE_ORDER = ['root', 'hips', 'spine1', 'spine2', 'neck', 'head', 'jaw', 'cap',
   'clavL', 'upperArmL', 'foreArmL', 'handL', 'fingAL', 'fingBL', 'thumbL', 'thighL', 'shinL', 'footL', 'toeL',
   'clavR', 'upperArmR', 'foreArmR', 'handR', 'fingAR', 'fingBR', 'thumbR', 'thighR', 'shinR', 'footR', 'toeR'];

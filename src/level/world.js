@@ -33,7 +33,7 @@ const GREY = { wall: 0x8c8a84, floor: 0x77746e, roof: 0x5d5b57, solid: 0x8c8a84,
 // art: { diner, motel, garage } area builders (default: the files under areas/). An area builder is
 // called as fn(B, W) with B.zone set to the area; it returns { real: true } when it drew the area
 // (then the greybox for that zone is skipped), anything else (the placeholders) and the greybox is
-// drawn. See the area builders under areas/ for the whole contract.
+// drawn. See the exports below for the whole contract.
 // footing: false builds the world without the no-footing rule (tests use it to show what it stops).
 export function buildWorld({ rng, atlas, decals, art = {}, footing = true }) {
   const fore = buildForecourt({ rng, atlas, decals });
@@ -532,7 +532,8 @@ export function createLevel(G) {
     for (const rec of recs.values()) {
       const im = new InstancedMesh(rec.geometry, mats[rec.material], rec.matrices.length);
       rec.matrices.forEach((m, i) => im.setMatrixAt(i, m));
-      im.frustumCulled = false;
+      im.computeBoundingSphere(); // the instances' spread: culled by three's own frustum test like any mesh
+      im.frustumCulled = true;
       im.userData.noReflect = true;
       (groups[zone] || root).add(im);
     }
@@ -630,7 +631,7 @@ export function createLevel(G) {
 
   const interactables = makeInteractables(state);
 
-  // Searchables, machines, the box and the bench are drawn by their own prop modules. A prop registers
+  // Searchables, machines, the box and the bench are drawn by other tasks' props. A prop registers
   // itself in level.props[searchable.prop] or level.objects[id] with setState(state) / setSearched(b);
   // these bindings drive them from the game's events (so neither side imports the other).
   const props = {};
@@ -717,6 +718,15 @@ export function createLevel(G) {
   if (p.power) state.setPower(true);
   installLayers(G);
   if (G.nav && typeof G.nav.rebuild === 'function') G.nav.rebuild();
+  // portal culling, run just before the main view is drawn (the camera is final then)
+  level.cull = createPortalCull(G, level);
+  if (G.scene && G.camera) {
+    const before = G.scene.onBeforeRender;
+    G.scene.onBeforeRender = function portalCull(r, s, cam, t) {
+      if (before) before.call(this, r, s, cam, t);
+      if (cam === G.camera) level.cull.update(cam);
+    };
+  }
 
   // Start the shader compiles now, against the HDR target the scene is really drawn into, so the
   // driver links them in parallel while the remaining modules boot behind the progress bar.
@@ -730,6 +740,225 @@ export function createLevel(G) {
     }
   } catch (e) { /* the first frame compiles them instead */ }
   return level;
+}
+
+// ---- portal culling ----------------------------------------------------------------------------
+// From inside an enclosed cell (W.cells: the diner, a motel room, the garage bays) nothing beyond its
+// walls can be seen except through its openings. Each frame, just before the main view is drawn
+// (scene.onBeforeRender with G.camera), every mesh of the level (each zone's buckets and art, the
+// vehicles, the glass and boards) and every zombie is tested: it is drawn if its box touches the
+// cell, or if its box (or its mirror image in the ground, for the puddle reflection) falls on the
+// screen inside one of the cell's openings that are themselves on screen. The screen test is of
+// the projected boxes' extents (conservative: anything that can show through an opening is drawn),
+// and the openings are looked for in a view CULL_GUARD times wider than the camera's, so what is
+// about to turn into view is already drawn (and already in the reflection the pass may hold over).
+// Outside every cell nothing is culled here (three's own frustum test still runs on every mesh).
+//
+// A mesh left out is not hidden: it is moved to SHADOW_LAYER, which the shadow cameras see and the
+// main and reflection cameras do not. So shadows stay exactly as they were (a culled zone's shadow
+// proxy is what keeps a lamp outside from lighting a room through its wall), and nothing touches
+// `visible`, which other code owns. No allocation per frame.
+export const SHADOW_LAYER = 7;
+const CULL_GUARD = 1.25; // openings are looked for this far past the screen's edge (NDC)
+const CULL_MARGIN = 0.3; // metres added round every opening and every mesh box
+const ZOMBIE_HALF = 1.5; // metres: a body's box round its position (arms, a lean, a corpse lying full length)
+const ZOMBIE_TOP = 2.4;
+const REBOX = 30; // frames between new measurements of the level's moving parts while culling
+export function createPortalCull(G, level, cells = W.cells) {
+  const ON = 1; // layer 0 only
+  const OFF = 1 << SHADOW_LAYER;
+  const entries = []; // { obj, box: Float32Array(6), mask }
+  const seen = new WeakSet();
+  const portals = new Float32Array(4 * 16); // visible openings' screen rects
+  const corner = new Float32Array(24); // 8 corners' clip x, y, w
+  const rect = new Float32Array(4);
+  const vp = new Matrix4();
+  const zb = new Float32Array(6);
+  let scanned = -1;
+  let culling = false;
+  let culled = 0;
+  const stats = { cell: null, portals: 0, culled: 0, zombiesCulled: 0 };
+  const _b = new Box3Lite();
+
+  function add(o) {
+    if (!o.isMesh || seen.has(o)) return;
+    seen.add(o);
+    if (o.name === 'shadow' || o.isSkinnedMesh) return; // the shadow proxy draws in shadow passes only
+    if (!_b.fromMesh(o)) return;
+    // a zone's buckets and art never move; anything else (a box's lid, a pickup, a vehicle's part) is
+    // measured again every REBOX frames
+    const fixed = !!o.parent && (o.parent === level.root || o.parent.parent === level.root) && !o.isInstancedMesh;
+    entries.push({ obj: o, box: _b.toArray(new Float32Array(6), CULL_MARGIN), mask: o.layers.mask, fixed });
+  }
+  let rebox = 0;
+  function reboxMoving() {
+    for (let i = 0; i < entries.length; i++) { const e = entries[i]; if (!e.fixed && _b.fromMesh(e.obj)) _b.toArray(e.box, CULL_MARGIN); }
+  }
+  function scan() {
+    level.root.traverse(add);
+    const v = G.scene.getObjectByName('vehicles');
+    if (v) v.traverse(add);
+    // the shadow cameras see the culled layer: the moon's (sky.js) and the shadowed spots' (lights.js)
+    G.scene.traverse((o) => { if (o.isLight && o.shadow && o.shadow.camera) o.shadow.camera.layers.enable(SHADOW_LAYER); });
+  }
+  const count = () => level.root.children.length * 1000 + G.scene.children.length;
+
+  // the screen extent of a box (min x, y, max x, y in NDC) into `rect`, clipped at the near plane;
+  // false when it is wholly behind the camera
+  function project(b, mirror) {
+    const e = vp.elements;
+    let front = 0;
+    for (let k = 0; k < 8; k++) {
+      const x = k & 1 ? b[3] : b[0], z = k & 4 ? b[5] : b[2];
+      const y = mirror ? -(k & 2 ? b[1] : b[4]) : (k & 2 ? b[4] : b[1]);
+      corner[k * 3] = e[0] * x + e[4] * y + e[8] * z + e[12];
+      corner[k * 3 + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+      const w = e[3] * x + e[7] * y + e[11] * z + e[15];
+      corner[k * 3 + 2] = w;
+      if (w > 1e-3) front++;
+    }
+    if (!front) return false;
+    rect[0] = Infinity; rect[1] = Infinity; rect[2] = -Infinity; rect[3] = -Infinity;
+    for (let k = 0; k < 8; k++) {
+      const w = corner[k * 3 + 2];
+      if (w > 1e-3) put(corner[k * 3], corner[k * 3 + 1], w);
+      if (front === 8) continue;
+      // edges to the corners that differ in one axis: where one crosses the near plane, its crossing
+      for (let bit = 1; bit < 8; bit <<= 1) {
+        const j = k | bit;
+        if (j === k) continue;
+        const wj = corner[j * 3 + 2];
+        if ((w > 1e-3) === (wj > 1e-3)) continue;
+        const t = (1e-3 - w) / (wj - w);
+        put(corner[k * 3] + (corner[j * 3] - corner[k * 3]) * t, corner[k * 3 + 1] + (corner[j * 3 + 1] - corner[k * 3 + 1]) * t, 1e-3);
+      }
+    }
+    return true;
+  }
+  function put(x, y, w) {
+    const px = x / w, py = y / w;
+    if (px < rect[0]) rect[0] = px;
+    if (px > rect[2]) rect[2] = px;
+    if (py < rect[1]) rect[1] = py;
+    if (py > rect[3]) rect[3] = py;
+  }
+  function throughPortal(b, n) {
+    for (let m = 0; m < 2; m++) {
+      if (m === 1 && b[1] <= 0.02) break; // nothing of it above the ground: no mirror image
+      if (!project(b, m === 1)) continue;
+      for (let i = 0; i < n; i++) {
+        const p = i * 4;
+        if (rect[2] >= portals[p] && rect[0] <= portals[p + 2] && rect[3] >= portals[p + 1] && rect[1] <= portals[p + 3]) return true;
+      }
+    }
+    return false;
+  }
+  const touches = (b, c) => b[3] >= c.min[0] && b[0] <= c.max[0] && b[4] >= c.min[1] && b[1] <= c.max[1] && b[5] >= c.min[2] && b[2] <= c.max[2];
+  const inside = (x, y, z, c) => x > c.min[0] && x < c.max[0] && y > c.min[1] && y < c.max[1] && z > c.min[2] && z < c.max[2];
+  const setOn = (o, on, mask) => {
+    const want = on ? mask : (mask & ~ON) | OFF;
+    if (o.layers.mask === want) return false;
+    o.layers.mask = want;
+    return true;
+  };
+  function restore() {
+    for (let i = 0; i < entries.length; i++) setOn(entries[i].obj, true, entries[i].mask);
+    const ch = G.scene.children;
+    for (let i = 0; i < ch.length; i++) if (ch[i].userData.portalCulled) zombie(ch[i], true);
+    culling = false; culled = 0;
+    stats.cell = null; stats.portals = 0; stats.culled = 0; stats.zombiesCulled = 0;
+  }
+  function zombie(o, on) {
+    o.userData.portalCulled = !on;
+    setOn(o, on, ON);
+    const c = o.children;
+    for (let i = 0; i < c.length; i++) if (c[i].isMesh) setOn(c[i], on, ON);
+  }
+
+  // The puddle reflection redraws the scene for the wet ground, which a room's floor is not: while
+  // every opening of the room the camera is in is behind it, no ground can be seen and the pass is
+  // switched off (by this code only: a pass someone else switched off stays off). It comes back on
+  // as soon as an opening is anywhere ahead of the camera, so even a fast turn finds the image ready
+  // (the ground reads it in the frame after it is drawn); only a camera cut straight to an opening
+  // can show one frame of puddles without it.
+  let reflection = null;
+  let reflOff = false;
+  let reflLook = 0;
+  function reflectionWanted(want) {
+    if (!reflection && reflLook-- <= 0) { reflLook = 120; reflection = G.post && !G.post.stub && G.post.getPass ? G.post.getPass('reflection') : null; }
+    if (!reflection) return;
+    if (!want && reflection.enabled) { reflection.enabled = false; reflOff = true; } else if (want && reflOff) { reflection.enabled = true; reflOff = false; }
+  }
+
+  function update(camera) {
+    const n = count();
+    if (n !== scanned) { scanned = n; scan(); }
+    const ce = camera.matrixWorld.elements;
+    let cell = null;
+    if (api.enabled) for (let i = 0; i < cells.length; i++) if (inside(ce[12], ce[13], ce[14], cells[i].box)) { cell = cells[i]; break; }
+    if (!cell) { if (culling) restore(); reflectionWanted(true); return; }
+    if (!culling || ++rebox >= REBOX) { rebox = 0; reboxMoving(); }
+    culling = true;
+    vp.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    let np = 0, ahead = 0;
+    for (let i = 0; i < cell.portals.length && np < 16; i++) {
+      const q = cell.portals[i];
+      zb[0] = q.min[0] - CULL_MARGIN; zb[1] = q.min[1] - CULL_MARGIN; zb[2] = q.min[2] - CULL_MARGIN;
+      zb[3] = q.max[0] + CULL_MARGIN; zb[4] = q.max[1] + CULL_MARGIN; zb[5] = q.max[2] + CULL_MARGIN;
+      if (!project(zb, false)) continue;
+      ahead++;
+      if (rect[2] < -CULL_GUARD || rect[0] > CULL_GUARD || rect[3] < -CULL_GUARD || rect[1] > CULL_GUARD) continue;
+      portals[np * 4] = Math.max(rect[0], -CULL_GUARD); portals[np * 4 + 1] = Math.max(rect[1], -CULL_GUARD);
+      portals[np * 4 + 2] = Math.min(rect[2], CULL_GUARD); portals[np * 4 + 3] = Math.min(rect[3], CULL_GUARD);
+      np++;
+    }
+    culled = 0;
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const on = touches(e.box, cell.box) || (np > 0 && throughPortal(e.box, np));
+      setOn(e.obj, on, e.mask);
+      if (!on) culled++;
+    }
+    // zombies (and the dead) hang straight off the scene: a box round each
+    let zc = 0;
+    const ch = G.scene.children;
+    for (let i = 0; i < ch.length; i++) {
+      const o = ch[i];
+      if (!o.isSkinnedMesh || !o.name.startsWith('zombie')) continue;
+      const p = o.position;
+      zb[0] = p.x - ZOMBIE_HALF; zb[1] = p.y - 0.2; zb[2] = p.z - ZOMBIE_HALF; zb[3] = p.x + ZOMBIE_HALF; zb[4] = p.y + ZOMBIE_TOP; zb[5] = p.z + ZOMBIE_HALF;
+      const on = touches(zb, cell.box) || (np > 0 && throughPortal(zb, np));
+      if (on === !!o.userData.portalCulled) zombie(o, on);
+      if (!on) zc++;
+    }
+    stats.cell = cell.id; stats.portals = np; stats.culled = culled; stats.zombiesCulled = zc;
+    reflectionWanted(ahead > 0);
+  }
+
+  // cells and entries are read by the walk test (scripts/perf.mjs --walk)
+  const api = { enabled: true, update, stats, restore, cells, entries, get cell() { return stats.cell ? cells.find((c) => c.id === stats.cell) : null; } };
+  return api;
+}
+
+// A world box of a mesh (geometry bounds, instanced spread included, times its world matrix).
+class Box3Lite {
+  constructor() { this.min = new Vector3(); this.max = new Vector3(); }
+  fromMesh(o) {
+    let bb = null;
+    if (o.isInstancedMesh) { if (!o.boundingBox) o.computeBoundingBox(); bb = o.boundingBox; } else if (o.geometry) {
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      bb = o.geometry.boundingBox;
+    }
+    if (!bb || bb.isEmpty()) return false;
+    o.updateWorldMatrix(true, false);
+    this.min.set(Infinity, Infinity, Infinity); this.max.set(-Infinity, -Infinity, -Infinity);
+    for (let k = 0; k < 8; k++) {
+      _p.set(k & 1 ? bb.max.x : bb.min.x, k & 2 ? bb.max.y : bb.min.y, k & 4 ? bb.max.z : bb.min.z).applyMatrix4(o.matrixWorld);
+      this.min.min(_p); this.max.max(_p);
+    }
+    return true;
+  }
+  toArray(a, m) { a[0] = this.min.x - m; a[1] = this.min.y - m; a[2] = this.min.z - m; a[3] = this.max.x + m; a[4] = this.max.y + m; a[5] = this.max.z + m; return a; }
 }
 
 // The vehicle layer and the diner and motel art are installed here, once G.level

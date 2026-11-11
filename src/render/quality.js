@@ -2,7 +2,7 @@
 // tier's name and never hard-coded.
 //
 //   G.quality.tier        'high' | 'medium' | 'low' | 'mobile'   the tier in use
-//   G.quality.name        'high' | 'medium' | 'low'   the phase 1 name; on `mobile` it reads 'low', so
+//   G.quality.name        'high' | 'medium' | 'low'   the original name; on `mobile` it reads 'low', so
 //                         code that still keys on the name (surface detail, rain) gets its cheapest path.
 //                         UI and every gate read `tier` (or better, a field), never `name`.
 //   G.quality.auto        true while the tier is the benchmark's choice, false once someone picked one
@@ -33,6 +33,8 @@
 //   zombieLodFar     metres beyond which a zombie uses its far mesh (zombie/manager.js)
 //   zombieShadowDist metres from a shadowed spot within which zombies are drawn into its shadow map;
 //                    0 = zombies cast no real shadow at all and get a contact blob instead
+//   zombieShadowMax  most bodies drawn into one shadow map: the nearest to a shadowed spot, and for the
+//                    moon the nearest to the camera (render/lights.js). 0 = none (blob shadows only)
 //   charTex          character texture size (zombie bake)
 //   particles, decals   live caps (fx)
 //   propDensity      share of optional level detail (clutter, foliage, backdrop props) to build: 1 = all
@@ -67,12 +69,12 @@ const DESKTOP = {
   charTex: 2048, particles: 4096, decals: 256, propDensity: 1, zoneDepth: 2, dynLo: 20, dynHi: 12,
 };
 export const PRESETS = {
-  high: { maxHeight: 1080, shadowRes: 2048, volSteps: 32, volFactor: 2, aoOn: true, msaa: 4, bloomMips: 7, reflection: true, reflScale: 0.5, ...DESKTOP, viewDetail: 1, vehicleNear: 12 },
-  medium: { maxHeight: 900, shadowRes: 1536, volSteps: 20, volFactor: 4, aoOn: true, msaa: 2, bloomMips: 6, reflection: true, reflScale: 0.4, ...DESKTOP, viewDetail: 1, vehicleNear: 10 },
-  low: { maxHeight: 720, shadowRes: 1024, volSteps: 12, volFactor: 4, aoOn: false, msaa: 0, bloomMips: 5, reflection: false, reflScale: 0.3, ...DESKTOP, viewDetail: 0.5, vehicleNear: 8 },
+  high: { maxHeight: 1080, shadowRes: 2048, volSteps: 32, volFactor: 2, aoOn: true, msaa: 4, bloomMips: 7, reflection: true, reflScale: 0.5, ...DESKTOP, viewDetail: 1, vehicleNear: 12, zombieShadowMax: 8 },
+  medium: { maxHeight: 900, shadowRes: 1536, volSteps: 20, volFactor: 4, aoOn: true, msaa: 2, bloomMips: 6, reflection: true, reflScale: 0.4, ...DESKTOP, viewDetail: 1, vehicleNear: 10, zombieShadowMax: 6 },
+  low: { maxHeight: 720, shadowRes: 1024, volSteps: 12, volFactor: 4, aoOn: false, msaa: 0, bloomMips: 5, reflection: false, reflScale: 0.3, ...DESKTOP, viewDetail: 0.5, vehicleNear: 8, zombieShadowMax: 4 },
   mobile: {
     maxHeight: 648, shadowRes: 1024, volSteps: 8, volFactor: 4, aoOn: false, msaa: 0, bloomMips: 4, reflection: false, reflScale: 0.3,
-    volLamps: 16, flare: false, depthPrepass: false, shadowedSpots: 1, spots: 4, points: 2, moonShadowEvery: 4, rain: 0.35, zombieLodFar: 7, zombieShadowDist: 0,
+    volLamps: 16, flare: false, depthPrepass: false, shadowedSpots: 1, spots: 4, points: 2, moonShadowEvery: 4, rain: 0.35, zombieLodFar: 7, zombieShadowDist: 0, zombieShadowMax: 0,
     charTex: 1024, particles: 1536, decals: 96, propDensity: 0.5, zoneDepth: 1, dynLo: 25, dynHi: 18, viewDetail: 0, vehicleNear: 6,
   },
 };
@@ -80,9 +82,9 @@ const DYN_WARMUP = 120; // frames after boot or a tier change before frame times
 const DEMOTE_MS = 10000; // at the scale floor and still slow for this long: one tier down
 const STALL_MS = 250; // a frame longer than this is a tab switch or a hitch: the demotion clock starts again
 const TOUCH_AUTO_MAX = 'mobile'; // the highest tier a touch device is given without asking
-// G.quality.name for tiers phase 1 did not have.
+// G.quality.name for tiers the original did not have.
 const PHASE1_NAME = { mobile: 'low' };
-// fx/rain.js's density by phase 1 name (its QUALITY_DENSITY). Only used to work out how much further
+// fx/rain.js's density by the original name (its QUALITY_DENSITY). Only used to work out how much further
 // to thin the rain where the tier's `rain` field is lower than what rain.js already does.
 const RAIN_BY_NAME = { high: 1, medium: 0.65, low: 0.4 };
 

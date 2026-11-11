@@ -665,7 +665,7 @@ describe('client: api and status cache', () => {
 });
 
 describe('client: copy', () => {
-  it('matches the expected report shape', () => {
+  it('matches the expected layout', () => {
     expect(SENT_TEXT).toBe('Thanks — report sent.');
     expect(reportErrorText({ error: 'rate_limited' })).toBe('You’ve sent a few already. Try again later.');
     expect(reportErrorText({ error: 'rate_limited', scope: 'global' })).toBe('You’ve sent a few already. Try again later.');

@@ -1,4 +1,4 @@
-// Audio engine: synthesises every buffer from the seeded RNG (spread across timer tasks after boot), builds
+// Audio engine: synthesises every buffer from the seeded RNG (spread across tasks after boot), builds
 // the Web Audio graph on the first user gesture, plays positional one-shots under a voice budget,
 // runs the ambience, reverb and music, and reacts to game events (events.js). The same graph code
 // renders offline (OfflineAudioContext) for measurement (scripts/audio-render.mjs).
@@ -13,7 +13,7 @@ import { MUSIC_SFX, MUSIC_NAMES, createMusic, musicIntensity } from './music.js'
 import { makeHandlers, EVENTS, TEST_SCRIPT, createWorldState } from './events.js';
 
 const DEFS = { ...SFX, ...AMBIENCE, ...WEAPON_SFX, ...VOICE_SFX, ...FOLEY_SFX, ...MUSIC_SFX };
-delete DEFS.reload; // phase 1's single pistol reload: replaced by the scheduled parts in weapons.js
+delete DEFS.reload; // the original single pistol reload: replaced by the scheduled parts in weapons.js
 // Memory on phones: buffers whose content sits well below 12 kHz are synthesised at 24 kHz (rain on a
 // roof, thunder, the music, voices, tails, stings) and the broadband rain at 32 kHz. 24 kHz is the
 // lowest rate every browser's createBuffer takes. Impulse responses stay at the context's rate

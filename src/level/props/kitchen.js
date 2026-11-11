@@ -1,5 +1,5 @@
 // The diner's kitchen fittings and the plain searchable containers. The containers are
-// stand-ins until buildContainer exists: each is drawn in the area's art mesh inside the
+// stand-ins until buildContainer replaces them: each is drawn in the area's art mesh inside the
 // collider worldLayout.standIns gives it, carries the orange tag that marks a searchable, and has a
 // lid, drawer or flap that moves when it has been searched (G.level.props[searchable.prop]).
 import { M, box, cyl, cylUp, extrude, lathe, rgb, sphere, torus } from '../build.js';

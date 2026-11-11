@@ -9,4 +9,3 @@ dist
 server/wrangler.toml
 server/.wrangler/
 .wrangler/
-

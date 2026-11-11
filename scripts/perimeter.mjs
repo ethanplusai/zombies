@@ -6,7 +6,7 @@
 // at a sprint with a jump. Fails if G.level.zoneAt(pos) is ever null or pos leaves the perimeter
 // polygon. Then saves a shot looking outward at eye height every --every metres of perimeter
 // (perim-<zone>-<n>.png) and one from each zone's highest standing points (perim-<zone>-top-<n>.png),
-// in $TMPDIR/graveyard-shift/shots/. Re-run it with --shots <zone> after changing a zone.
+// in $TMPDIR/graveyard-shift/shots/. Re-run it with --shots <zone> after changing an area.
 import { parseArgs } from 'node:util';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';

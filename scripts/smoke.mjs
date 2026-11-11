@@ -79,7 +79,7 @@ async function playthroughFull(page) {
     const G = window.__G;
     window.__ev = { take: 0, upgrade: 0, machine: 0, roll: 0, search: {}, starts: {}, brutes: 0, bruteKills: 0 };
     const E = window.__ev;
-    // stand-ins for the machine and box-spot objects (the real objects replace them): world.js drives their state
+    // stand-ins for the machine and box-spot objects (the object builders draw them): world.js drives their state
     for (const sp of [...G.level.machineSpots, ...G.level.boxSpots]) {
       if (!G.level.objects[sp.id]) G.level.objects[sp.id] = { state: null, setState(st) { this.state = st; } };
     }

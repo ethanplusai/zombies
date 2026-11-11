@@ -249,7 +249,7 @@ function mountSettingsRows(G, hints) {
   return null;
 }
 
-// The rest of the hint UI. It lives behind createHints because main.js builds this module last and the hint system does not
+// The rest of the hint UI. It lives behind createHints because main.js builds this module last and the hints do not
 // own main.js or hud.js; each piece is guarded so a failure in one never takes the others (or the game) down.
 function mountExtras(G, hints) {
   const parts = [];

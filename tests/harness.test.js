@@ -48,7 +48,7 @@ describe('createPassStats', () => {
 });
 
 describe('readStats', () => {
-  it('adds the phase 2 fields with safe defaults when the modules do not exist yet', () => {
+  it('adds the extended fields with safe defaults when the modules do not exist yet', () => {
     const s = readStats({ quality: { name: 'high' } }, { fps: 60, frameMs: 5 });
     expect(s).toMatchObject({ tier: 'high', renderScale: 1, inputMode: null, zone: null, weapon: null, power: false, plates: 0 });
   });

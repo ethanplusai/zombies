@@ -10,7 +10,7 @@
 //   seconds   how long it stays at most (default 6); priority: higher first when two want the screen
 //   target    (G) -> [x, z] | null: where to point the compass while it is up
 //
-// ids are binding (the table's order); a new hint is added by pushing onto HINTS.
+// ids are binding; another module adds one by pushing onto HINTS.
 import { tuning } from '../game/tuning.js';
 
 const P = tuning.points || { hit: 10, kill: 60, headshotKill: 100 };

@@ -161,7 +161,7 @@ export function createArms(G, patch, pistol) {
       // The glove is dark fabric under every lamp: low albedo and next to no nap. (With the knit's
       // full nap the back of the hand took the lamp's colour whole: mustard under sodium, grey under
       // the canopy, black in the dark. Now the light tints a dark glove.) The weave is raised instead.
-      // Phase 2: the glove is colour-blocked so its construction reads at arm's length: a slate
+      // The glove is colour-blocked so its construction reads at arm's length: a slate
       // ripstop back with a woven grid you can count (`weave`: pitch in metres, relief), tan suede
       // on the palm, the fingertips and the thumb, pale thread in every seam, a matt moulded
       // knuckle guard, a webbing strap.

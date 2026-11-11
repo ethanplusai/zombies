@@ -1,4 +1,4 @@
-// Phase 1 values, frozen. The aggregator (../tuning.js) re-exports them under their old keys.
+// The original values, frozen. The aggregator (../tuning.js) re-exports them under their old keys.
 export const core = {
   player: { eye: 1.7, radius: 0.35, walk: 4.2, sprint: 6.5, jump: 4.8, health: 100, regenDelay: 4, regenRate: 25 },
   walker: {
@@ -18,7 +18,7 @@ export const core = {
   wallAmmo: { cost: 250 }, // fills reserve to pistol.maxReserve
 };
 
-// Frozen: other sections add values in their own file, they do not edit these.
+// Frozen: other modules add values in their own section, they do not edit these.
 const freeze = (o) => {
   for (const v of Object.values(o)) if (v && typeof v === 'object') freeze(v);
   return Object.freeze(o);

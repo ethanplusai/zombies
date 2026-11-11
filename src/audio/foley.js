@@ -287,7 +287,7 @@ function* stingBoss(sr, rng) {
 const hintBlip = (sr, rng) => { const o = samples(sr, 0.3); modal(sr, 0, [[1175, 0.08, 0.5], [2350, 0.04, 0.2]], rng, o, 0); modal(sr, 0, [[1568, 0.1, 0.5], [3136, 0.05, 0.2]], rng, o, Math.round(0.07 * sr)); return done(o, sr, 0.001, 0.05, 0.8); };
 const uiTick = (sr, rng) => { const o = samples(sr, 0.08); click(sr, rng, o, 0, 2600, 0.6); return done(o, sr, 0.0005, 0.02, 0.8); };
 
-// Purchase (less beepy than phase 1): a register's drawer knock and one soft struck bar.
+// Purchase (less beepy than the original): a register's drawer knock and one soft struck bar.
 const purchase2 = (sr, rng) => { const o = samples(sr, 0.7); click(sr, rng, o, 0, 900, 0.5, 1.0); modal(sr, 0, [[1047, 0.22, 0.35], [2093, 0.08, 0.1], [3140, 0.04, 0.05]], rng, o, Math.round(0.05 * sr)); for (let k = 0; k < 3; k++) modal(sr, 0, [[rng.range(3500, 4800), 0.04, 0.12]], rng, o, Math.round((0.08 + k * 0.03) * sr)); return done(o, sr, 0.001, 0.08, 0.85); };
 // Denied: a dull wooden knock twice, no buzzer.
 const denied2 = (sr, rng) => { const o = samples(sr, 0.35); for (const at of [0, 0.12]) { grain(sr, rng, o, at * sr, { freq: 320, q: 0.8, tau: 0.015, amp: 2, type: 'lowpass' }); modal(sr, 0, [[rng.range(190, 210), 0.04, 0.4], [430, 0.02, 0.2]], rng, o, Math.round(at * sr)); } return done(o, sr, 0.001, 0.04, 0.8); };

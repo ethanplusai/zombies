@@ -47,7 +47,7 @@ import { installSoftShadows, configureSpotShadow, setMoonShadowCadence } from '.
 const freeSlot = (slots, n) => { for (let i = 0; i < n; i++) if (!slots[i].fixture) return slots[i]; return null; };
 
 export const UNIT = 1 / 10;
-const N_SHADOW = 2; // was 3: each shadowed spot costs about 1.3 ms a frame on high at 1080p with a crowd (perf pass)
+const N_SHADOW = 2; // was 3: each shadowed spot costs about 1.3 ms a frame on high at 1080p with a crowd 
 const N_SPOT = 6; // was 5: the spot that lost its shadow slot keeps a real light, so no lamp drops to a ground pool
 const N_POINT = 3;
 const FADE_TIME = 0.45; // seconds for a slot to fade in or out
@@ -412,23 +412,45 @@ export function createLights(G) {
     }
   }
   if (G.events && G.events.on) G.events.on('zombie:spawn', () => { sinceBodyScan = BODY_SCAN_FRAMES; });
+  // Each map takes at most G.quality.zombieShadowMax bodies: the nearest to the spot, or for the moon
+  // (whose map follows the camera) the nearest to the camera. A body further down the list throws
+  // a shadow too small or too faint to miss next to the ones nearer the lamp, and was a draw per
+  // map. Distances go in a fixed array; the cut is the n-th smallest of them (no allocation).
+  const bodyD2 = new Float64Array(256);
+  function nthSmallest(n, count) {
+    let cut = -Infinity;
+    for (let k = 0; k < n; k++) {
+      let best = Infinity;
+      for (let i = 0; i < count; i++) { const v = bodyD2[i]; if (v > cut && v < best) best = v; }
+      if (best === Infinity) return Infinity; // fewer than n distinct: every one stays
+      cut = best;
+    }
+    return cut;
+  }
   function gateShadowPass(shadowCamera) {
     restoreBodies();
-    const dist = G.quality && Number.isFinite(G.quality.zombieShadowDist) ? G.quality.zombieShadowDist : Infinity;
+    const q = G.quality || {};
+    const dist = Number.isFinite(q.zombieShadowDist) ? q.zombieShadowDist : Infinity;
+    const max = Number.isFinite(q.zombieShadowMax) ? Math.max(0, Math.floor(q.zombieShadowMax)) : Infinity;
     let from = null;
     for (let i = 0; i < tiers.shadow.length; i++) if (tiers.shadow[i].light.shadow.camera === shadowCamera) from = tiers.shadow[i].light.position;
-    if (!from && dist > 0) return; // the moon (or someone else's light): bodies stay in unless the tier gives them no shadow at all
-    const d2 = dist * dist;
-    for (let i = 0; i < bodies.length; i++) {
+    const moon = !from;
+    if (moon && dist > 0 && max === Infinity) return; // the moon (or someone else's light), uncapped: bodies stay in unless the tier gives them no shadow at all
+    if (moon) from = camPos; // the moon's map is fitted round the camera: the bodies nearest it are the ones that show
+    const d2 = moon ? Infinity : dist * dist;
+    let n = 0;
+    for (let i = 0; i < bodies.length && n < bodyD2.length; i++) {
+      const m = bodies[i];
+      if (!m.castShadow || !m.visible) { bodyD2[n++] = Infinity; continue; }
+      const e = m.matrixWorld.elements;
+      const dx = e[12] - from.x; const dy = moon ? 0 : e[13] + 1 - from.y; const dz = e[14] - from.z;
+      bodyD2[n++] = dx * dx + dy * dy + dz * dz;
+    }
+    const cut = dist <= 0 || max <= 0 ? -Infinity : max < n ? Math.min(d2, nthSmallest(max, n)) : d2;
+    for (let i = 0; i < bodies.length && i < n; i++) {
       const m = bodies[i];
       if (!m.castShadow || !m.visible) continue;
-      let out = dist <= 0;
-      if (!out) {
-        const e = m.matrixWorld.elements;
-        const dx = e[12] - from.x; const dy = e[13] + 1 - from.y; const dz = e[14] - from.z;
-        out = dx * dx + dy * dy + dz * dz > d2;
-      }
-      if (out) { m.castShadow = false; gated.push(m); }
+      if (bodyD2[i] > cut) { m.castShadow = false; gated.push(m); }
     }
   }
   const gate = new Mesh(new BufferGeometry(), new MeshBasicMaterial());
@@ -713,7 +735,7 @@ export function createLights(G) {
     poolAlbedo: 0.045, poolRoughness: 0.35,
     realDistance: REAL_LIGHT_DISTANCE, // metres; fixtures farther than this from the camera are pool-only
     fixtures, shadowed, unshadowed, muzzle, root,
-    lampFill: fill, // see the header; false below switches it off (the sky fill replaces it)
+    lampFill: fill, // see the header; false below switches it off (the sky's fill replaces it)
     useLampFill: true,
     // intensity 1 = one pistol shot. Decays by itself; call again each shot. 0 switches it off now.
     setMuzzleFlash(pos, intensity = 1) {

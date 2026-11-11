@@ -120,7 +120,7 @@ describe('prompt copy per device', () => {
   });
 });
 
-describe('sanitizeSettings, phase 2 keys', () => {
+describe('sanitizeSettings, extended keys', () => {
   it('accepts the touch settings and clamps them', () => {
     expect(sanitizeSettings({ touchSens: 0.1 }).touchSens).toBe(0.5);
     expect(sanitizeSettings({ touchSens: 9 }).touchSens).toBe(2);
@@ -258,7 +258,7 @@ describe('settings', () => {
 });
 
 describe('quality labels', () => {
-  it('maps the real tier, not the phase 1 name', () => {
+  it('maps the real tier, not the original name', () => {
     expect(qualityLabel('mobile', true)).toBe('Auto (Phone)');
     expect(qualityLabel('mobile', false)).toBe('Phone');
     expect(qualityLabel('high', true)).toBe('Auto (High)');

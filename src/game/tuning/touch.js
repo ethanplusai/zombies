@@ -1,5 +1,5 @@
-// Touch controls, aim assist and the player's armour. Starting values.
-// Angles in degrees where the name says so; distances in CSS px or metres.
+// Touch controls, aim assist and the player's armour. Design choices, open to tuning.
+// line by line. Angles in degrees where the name says so; distances in CSS px or metres.
 export const touch = {
   // Stick: anchored where the thumb lands; full deflection at stickRadius from the anchor.
   stickRadius: 56, // CSS px

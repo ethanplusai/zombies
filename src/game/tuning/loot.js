@@ -1,5 +1,5 @@
 // Searching: findable loot. Every searchable is searched once per
-// game for one seeded reward. Starting values.
+// game for one seeded reward. Design choices, open to tuning.
 export const loot = {
   hold: 1.5, // s of interact held
   radius: 1.6, // m: stand this close to start

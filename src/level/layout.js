@@ -25,7 +25,7 @@ export const ISLANDS = [[-7.5, -6.5], [3.5, -6.5], [-7.5, -0.5], [3.5, -0.5]];
 
 // Ways in through the wire. Everything that has to agree about them is derived from this one
 // table: the holes cut in the fence runs, the sagging climb sections and the clearings the treeline
-// keeps open behind them. (the spawn points are worldLayout.js's; a torn panel is a
+// keeps open behind them. (The spawn points are worldLayout.js's; a torn panel is a
 // GAP_W hole a zombie squeezes through and the player cannot; the east fence is the forecourt's
 // side of the garage and the alley now, with the alley mouth and the d4 gate cut in it there.)
 //   gaps: where the mesh is torn open (coordinate along the run), each GAP_W wide

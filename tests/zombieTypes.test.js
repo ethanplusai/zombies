@@ -1,6 +1,6 @@
 // Zombie types: runner, armoured, bloater, brute; limb loss and crawlers; decoy lures.
 // Like zombieAi.test.js, the real body, animator and test stage are replaced by a stub body and the
-// ghost animator, so these run whatever state the body files are in.
+// ghost animator, so these run whatever state the body task's files are in.
 import { describe, it, expect, vi } from 'vitest';
 import { createZombies } from '../src/zombie/manager.js';
 import { createGhostAnimator } from '../src/zombie/ai.js';

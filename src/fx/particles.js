@@ -880,7 +880,7 @@ export function createFx(G) {
         }
       }
     });
-    // Corpse pools belong to blood.js. Until it takes over (fx.bloodOwner, or fx.corpsePools =
+    // Corpse pools belong to blood.js. Until its blood.js takes over (fx.bloodOwner, or fx.corpsePools =
     // false), a death lays one modest pool that spreads over a few seconds.
     const dieOpts = { kind: 'pool', size: 0.6, dir: null, grow: 5 };
     G.events.on('zombie:die', (e) => {
@@ -920,7 +920,7 @@ export function createFx(G) {
     gore: G.params && G.params.gore === 'reduced' ? 0.3 : 1,
     // set true by whoever takes over deciding what a hit spills (blood.js)
     bloodOwner: false,
-    // one modest pool under each body until blood.js's corpse pools exist; false switches it off
+    // one modest pool under each body until the corpse pools exist; false switches it off
     corpsePools: true,
     KIND, CELL: P_CELL,
     // The flash as particles and decals see it: { pos:Vector3, color:Vector3, intensity (scene cd), range }.

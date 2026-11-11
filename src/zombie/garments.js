@@ -318,7 +318,7 @@ function box(mesh, c, h, yaw, w, slot, shell) {
 // ---- headwear: lathes on the `cap` bone, kept outside the skull's hull --------------------------
 // profile(a) -> [[radius scale or absolute, y], ...] rows from the band up to the top
 function hat(mesh, fig, q, o) {
-  const near = q >= 1, n = near ? 24 : 12, w = [[B.cap, 1]];
+  const near = q >= 1, n = near ? (o.n || 24) : 12, w = [[B.cap, 1]];       // o.n: segments round it at the near level (a wide brim needs more to stay round)
   const ang = ringA(n);
   // the head's outline at band height, plus ease: what the hat sits on
   const hull = ang.map((a) => { const d = [Math.sin(a), 0, Math.cos(a)]; const h = march(fig, d[0] * 0.2, o.band, HEAD_C[2] + d[2] * 0.2, -d[0], 0, -d[2], 0.2, HEAD); return (h < 0 ? 0.09 : 0.2 - h) + o.ease; });
@@ -327,9 +327,9 @@ function hat(mesh, fig, q, o) {
   mesh.shell = o.name;
   const v0 = mesh.count, rows = o.rows(near), nR = rows.length, ids = [], g = GUTTER;
   for (let i = 0; i < nR; i++) for (let j = 0; j <= n; j++) {
-    const a = ang[j % n], [rs, y, add] = rows[i](a);
+    const a = ang[j % n], [rs, y, add, vv] = rows[i](a);       // (vv: the row's own place up the piece, where the rows are not even)
     const R = hull[j % n] * rs + (add || 0);
-    const u = j / n, v = i / (nR - 1);
+    const u = j / n, v = vv ?? i / (nR - 1);
     ids.push(mesh.vert(Math.sin(a) * R, y, HEAD_C[2] + Math.cos(a) * R, 0, 1, 0, rect[0] + g + (rect[2] - rect[0] - 2 * g) * u, rect[1] + g + (rect[3] - rect[1] - 2 * g) * v, w, [u * 0.75, v * 0.3, 0, SLOT.hat]));
   }
   for (let i = 0; i + 1 < nR; i++) for (let j = 0; j < n; j++) mesh.quad(ids[i * (n + 1) + j], ids[i * (n + 1) + j + 1], ids[(i + 1) * (n + 1) + j + 1], ids[(i + 1) * (n + 1) + j], true);
@@ -375,12 +375,15 @@ function hats(mesh, fig, q) {
   });
   // campaign hat: wide flat brim, tall crown pinched in four
   hat(mesh, fig, q, {
-    name: 'campaign', band: 1.735, ease: 0.006, bake: { hat: 4 },
+    name: 'campaign', band: 1.735, ease: 0.006, bake: { hat: 4 }, n: 40,
     rows: () => {
       const pinch = (a, k) => 1 - k * (0.5 + 0.5 * Math.cos(4 * a + Math.PI));
+      // (few rows, many segments: the brim's edge is what is seen, and at 24 it was a polygon. Each
+      // row names its place up the piece, so the band stays where the bake draws it.)
+      const brim = (a) => 0.086 + 0.012 * Math.abs(Math.sin(a)), dip = (a) => 0.004 * Math.cos(2 * a);
       return [
-        (a) => [1, 1.727 - 0.012, 0.082 + 0.012 * Math.abs(Math.sin(a))], (a) => [1, 1.727 - 0.004, 0.086 + 0.012 * Math.abs(Math.sin(a))], (a) => [1, 1.727 - 0.001, 0.05], () => [1, 1.73, 0.004],
-        () => [1, 1.76, 0.001], (a) => [0.97 * pinch(a, 0.06), 1.795], (a) => [0.86 * pinch(a, 0.2), 1.825], (a) => [0.6 * pinch(a, 0.35), 1.843], (a) => [0.25 * pinch(a, 0.2), 1.85], () => [0, 1.851],
+        (a) => [1, 1.727 - 0.012 + dip(a), brim(a) - 0.004, 0], (a) => [1, 1.727 - 0.004 + dip(a), brim(a), 1 / 9], () => [1, 1.73, 0.004, 3 / 9],
+        (a) => [0.97 * pinch(a, 0.06), 1.795, 0, 5 / 9], (a) => [0.72 * pinch(a, 0.3), 1.838, 0, 7 / 9], () => [0, 1.851, 0, 1],
       ];
     },
   });
@@ -417,7 +420,7 @@ export function buildGarments(mesh, fig, q) {
   sleeves(mesh, fig, q, { name: 'hoodie', slot: SLOT.outer, len: 0.57, ease: 0.034, cuff: true, fold: 0.012 });
   torso(mesh, fig, q, { cap: true, name: 'robe', slot: SLOT.outer, top: 1.5, hem: 0.36, ease: 0.03, collar: 0.03, hang: 0.94, fold: 0.02, seed: 53, flare: 0.05, groups: TRUNK | LEG, bake: { robe: 1 },
     push: (p, d, i, a, f) => (p[1] < 0.86 && Math.abs(p[0]) < 0.05 ? [p[0], p[1], Math.max(p[2], 0.1)] : p) });
-  sleeves(mesh, fig, q, { name: 'robe', slot: SLOT.outer, len: 0.5, ease: 0.045, fold: 0.014 });
+  sleeves(mesh, fig, q, { name: 'robe', slot: SLOT.outer, len: 0.5, ease: 0.027, fold: 0.011 });
   torso(mesh, fig, q, { name: 'vestHi', slot: SLOT.extra, neck: 0.85, top: 1.47, hem: 0.98, ease: 0.034, hang: 0.95, gap: 0.3, fold: 0.006, seed: 59, bake: { vest: 1 } });
   torso(mesh, fig, q, { name: 'armour', slot: SLOT.outer, neck: 0.8, top: 1.47, hem: 1.05, ease: 0.036, hang: 1, fold: 0, seed: 61, bake: { armour: 1 },
     // plates: flat front and back

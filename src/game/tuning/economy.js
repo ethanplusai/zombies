@@ -1,10 +1,10 @@
 // The money economy: points, prices, the weapon box, the bench, the machines and the
-// power-ups. Door prices live in tuning.world.doors, wall
-// weapon and wall ammo prices in tuning.weapons.table[id].wall.
+// power-ups. Design choices unless marked; door prices are tuning.world.doors, wall
+// weapon and wall ammo prices are tuning.weapons.table[id].wall.
 export const economy = {
-  // Points for hits and kills. hit, kill, headshotKill and start are phase 1's (tuning.points alias).
+  // Points for hits and kills. hit, kill, headshotKill and start are the original values (tuning.points alias).
   points: { hit: 10, kill: 60, headshotKill: 100, meleeKill: 130, start: 500, bruteKill: 500 },
-  // Phase 1 alias (tuning.wallAmmo): the store's wall ammo is the pistol's, at the pistol's price.
+  // Original alias (tuning.wallAmmo): the store's wall ammo is the pistol's, at the pistol's price.
   wallAmmo: { cost: 250 },
   upgradedAmmo: 4500, // ammo for an upgraded weapon, at any wall: fills it
   // worldLayout's wall-buy names -> the weapon table's ids

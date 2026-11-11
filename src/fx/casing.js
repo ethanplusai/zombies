@@ -4,7 +4,7 @@
 // ejectWorld). That is where the brass starts. Only when a payload has no `eject` (no viewmodel:
 // tests, a stubbed weapon) is the port estimated from the muzzle `pos`.
 //
-// Phase 2. The port in the payload is now the port itself (it used to be a point held clear of the
+// The port in the payload is now the port itself (it used to be a point held clear of the
 // gun's outline): for its first moments the case is drawn by the viewmodel as a real piece of
 // brass, lit by the muzzle flash and sorted against the gun, flying this same launch (`lastLaunch`),
 // and the world particle carries on from there. Weapons that throw nothing on the shot (a revolver

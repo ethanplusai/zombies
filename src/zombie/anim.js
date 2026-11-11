@@ -40,7 +40,7 @@ const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 const xyz = (p, i) => (p ? (p.x !== undefined ? (i === 0 ? p.x : i === 1 ? p.y : p.z) : p[i]) : 0);
 
 // Bare feet have a few toe-tip vertices that carry no weights and so follow the hips (body files,
-// buildZombie). Standing, the hips are over the feet and it does not show; lying, crawling or thrown,
+// the body builder). Standing, the hips are over the feet and it does not show; lying, crawling or thrown,
 // they draw a spike from the toes to the pelvis. Give them to the toe bone, once per shared geometry.
 function mendToes(zombie) {
   const g = zombie.mesh && zombie.mesh.geometry;
@@ -1023,7 +1023,7 @@ export function createAnimator(zombie) {
     // coil: the weight sinks back onto bent knees, the hands come up clawed beside the head and the jaw
     // drops. Lunge: the body is thrown at the prey UPRIGHT, chest first, so what the prey sees is the
     // face coming at its own between two reaching hands. Then it hangs on: pulls itself in, snapping.
-    // (Phase 1 bowed the trunk through the blow and the player saw the top of a head.)
+    // (The original bowed the trunk through the blow and the player saw the top of a head.)
     stateAdd.pz = -0.11 * wind + 0.04 * hold;
     stateAdd.py = -0.06 * wind + 0.05 * hold;
     stateAdd.pitch = 0.1 * wind + (0.04 + 0.1 * (lunge - 1)) * hold + 0.05 * over;

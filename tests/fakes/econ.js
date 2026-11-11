@@ -1,4 +1,4 @@
-// A fake G for the economy tests (purchases, box, powerups, loot, score): the real game
+// The fake G for the economy tests (purchases, box, powerups, loot, score): the real game
 // (createGame), the real weapon (createWeapon, no view), and small stand-ins for the player, the
 // level, the zombies and the input. Not a test file itself.
 import { createGame } from '../../src/game/state.js';
@@ -22,7 +22,7 @@ export function fakePlayer(G) {
     addPlates(n) { const add = Math.max(0, Math.min(3 - p.plates, n)); p.plates += add; if (add) G.events.emit('armor:change', { plates: p.plates }); return add; },
     heal(n) { p.health = Math.min(p.maxHealth, p.health + n); },
     setLethalHook(fn) { p.lethalHook = fn; },
-    // the player's damage, reduced: a killing hit asks the lethal hook once
+    // the controller's damage, reduced: a killing hit asks the lethal hook once
     damage(amount) {
       if (!p.alive || p.invulnerable > 0) return false;
       if (amount >= p.health && p.lethalHook) {
@@ -43,7 +43,7 @@ export function fakePlayer(G) {
   return p;
 }
 
-// A level shaped like the real one: the real searchables and spots, a door, the power switch, a window.
+// A level with the world's shape: the real searchables and spots, a door, the power switch, a window.
 export function fakeLevel(G) {
   const doors = [{ id: 'd1', a: 'forecourt', b: 'diner', cost: 750, pos: [5, 1, 5], open: false }];
   const power = { on: false, pos: [64, 1.4, 4.34], zone: 'garage' };

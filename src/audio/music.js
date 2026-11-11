@@ -1,4 +1,4 @@
-// Adaptive music bed (three sparse loops, not a tune. A low drone
+// Adaptive music bed (first in the cut order): three sparse loops, not a tune. A low drone
 // (always under the round), a muffled pulse that comes in as the lot fills, and a thin high cluster
 // for the last quarter of a round. Intensity follows alive / maxAlive and the round's last quarter.
 // Off by default on the `mobile` tier. G.audio.music = { intensity, enabled }.

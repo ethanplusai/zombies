@@ -292,7 +292,7 @@ describe('early-round easing (real tuning)', () => {
   });
 });
 
-describe('round scaling (phase 2)', () => {
+describe('round scaling', () => {
   it('total: 6 + 4n to round 10, then faster', () => {
     expect(rounds.total(1)).toBe(10);
     expect(rounds.total(10)).toBe(46);

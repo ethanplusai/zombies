@@ -13,7 +13,7 @@ import { createCollision } from '../src/level/collision.js';
 import { createNav, createFlowField } from '../src/nav/flowfield.js';
 
 // The tests inject a stub body and the ghost animator, so the real body, animator and test-stage
-// modules (owned by the body module) are replaced and never loaded.
+// modules (owned by the body task, often mid-rework) are replaced and never loaded.
 vi.mock('../src/zombie/body.js', () => ({ buildZombie: () => { throw new Error('real body not used in tests'); } }));
 vi.mock('../src/zombie/anim.js', () => ({ createAnimator: () => { throw new Error('real animator not used in tests'); } }));
 vi.mock('../src/zombie/zombietest.js', () => ({ installZombieTest: () => ({ update() {} }) }));
@@ -496,7 +496,7 @@ describe('ghost animator', () => {
   });
 });
 
-describe('player gap, wind-up and clear', () => {
+describe('crowd spacing and raycasts', () => {
   const hooks = { attackStart() {}, attackEnd() {}, climb() {}, stuck() {} };
   const one = (x, state) => {
     const c = createCrowd(4);
@@ -677,7 +677,7 @@ function camera(x, z, fx, fz) {
 }
 
 // The ghost animator, except that a climb (fence or window) never ends: it stays in 'climb' or
-// 'window', not done, with no root motion (an animator clip that does not finish in idle).
+// 'window', not done, with no root motion (an animation clip that does not finish in idle).
 function frozenClimb() {
   const g = createGhostAnimator();
   let frozen = null;
@@ -694,7 +694,7 @@ function frozenClimb() {
   };
 }
 
-describe('attacks, climbs and doors', () => {
+describe('stuck climbs', () => {
   it('a climb the animator never ends is left after 5 s, on the far side of the fence', () => {
     const fence = { min: [22.25, 0, -10], max: [22.35, 1.65, 10] };
     const sp = { pos: [23.7, 0, 1.5], kind: 'fence', top: 1.65, to: [21.2, 0, 1.5] };
@@ -869,7 +869,7 @@ describe('attacks, climbs and doors', () => {
 // ---- the real map: windows, stairs, the walkway, doors ---------------------------------
 // The whole world's colliders (buildWorld, as the perimeter test does), the world state (doors,
 // boards, active spawn points), the level's collision for heightAt, and the real two-layer nav.
-describe('layered world (phase 2)', () => {
+describe('layered world', () => {
   let built;
   beforeAll(() => {
     const rng = createRng(1).fork('level');

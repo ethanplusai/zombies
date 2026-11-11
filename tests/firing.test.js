@@ -652,7 +652,7 @@ describe('viewmodel visibility follows the game state', () => {
 });
 
 
-// ---------------------------------------------------------------- phase 2: the arsenal's fire control
+// ---------------------------------------------------------------- the arsenal's fire control
 
 describe('fire control by weapon', () => {
   it('the SMG fires 13 rounds in 1.0 s with the trigger held (780 rpm)', () => {
@@ -916,7 +916,7 @@ describe('fire control by weapon', () => {
     expect(seen.filter((s) => s[0] === 'weapon:low')).toHaveLength(2);
   });
 
-  it('the pistol payloads keep their phase 1 fields and gain pellets, upgraded and dir', () => {
+  it('the pistol payloads keep their original fields and gain pellets, upgraded and dir', () => {
     const m = mockG({ zHit: { id: 9, part: 'torso', pos: [0, 1.7, -8], dist: 8 } });
     const w = createWeapon(m.G, { createView: () => null });
     w.fire();

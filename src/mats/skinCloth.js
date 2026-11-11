@@ -643,6 +643,44 @@ void clothSurface(inout Surf s) {
   #endif
   col = mix(avg, col, fW);
   rough += 0.04 * (1.0 - fW);
+  // ---- what the weave adds up to. From a metre the threads are finer than a pixel, but the cloth
+  // they make is not smooth: denim's wale runs up it on the diagonal, a knit stands in ribs of
+  // stitches, canvas is a basket you can count, flannel and cotton a softer and a finer one, a
+  // towel a pile of tufts. Each is drawn at the few millimetres it reads at, as tone and as relief,
+  // and gives way to the real threads close to and to the mean far off.
+  vec2 mdh = vec2(0.0); float mAmp = 0.0;
+  #if SURF_Q > 0
+  {
+    float Tm = kind == 0 ? 300.0 : kind == 4 ? 280.0 : kind == 2 ? 330.0 : kind == 1 ? 300.0 : kind == 6 ? 420.0 : kind == 7 ? 240.0 : 0.0;
+    float fM = Tm > 0.0 ? (1.0 - smoothstep(0.2, 0.55, gFp * Tm * (kind == 0 ? 1.4 : 1.0))) * (1.0 - 0.65 * fW) * seam : 0.0;
+    if (fM > 0.0) {
+      vec2 m = uv * Tm; vec2 mi = floor(m), mf = m - mi;
+      float tone = 0.0;
+      if (kind == 0) {
+        float ph = 6.28318 * (m.x - m.y) + 1.5 * (fine - 0.5);       // (the slubs nudge the wale, so it is never ruled)
+        float r = 0.5 + 0.5 * sin(ph);
+        mdh = vec2(1.0, -1.0) * 3.14159 * cos(ph); tone = (r - 0.5) * 0.3; mAmp = 0.2;
+      } else if (kind == 4) {
+        float leg = mf.y - abs(mf.x - 0.5) * 1.1;
+        float wale = sin(3.14159 * mf.x), st = 0.65 + 0.35 * sin(6.28318 * leg);
+        mdh = vec2(3.14159 * cos(3.14159 * mf.x) * st, wale * 2.2 * cos(6.28318 * leg));
+        tone = (wale * st - 0.55) * 0.36; mAmp = 0.24;
+      } else if (kind == 7) {
+        vec3 hh = sHash3(ivec3(int(mi.x), int(mi.y), 9));
+        vec2 d = mf - 0.5 - (hh.xy - 0.5) * 0.45; float tuft = exp(-dot(d, d) * 9.0);
+        mdh = -18.0 * d * tuft; tone = (tuft - 0.4) * 0.5 * (0.7 + 0.6 * hh.z); mAmp = 0.16;
+      } else {
+        bool wf = mod(mi.x + mi.y, 2.0) < 0.5;
+        float k2 = kind == 2 ? 1.0 : kind == 1 ? 0.5 : 0.6;
+        float r = wf ? sin(3.14159 * mf.y) : sin(3.14159 * mf.x);
+        mdh = wf ? vec2(0.0, 3.14159 * cos(3.14159 * mf.y)) : vec2(3.14159 * cos(3.14159 * mf.x), 0.0);
+        tone = (r - 0.62) * 0.36 * k2; mAmp = 0.24 * k2;
+      }
+      col *= 1.0 + 0.62 * tone * fM;
+      mAmp *= 0.6 * fM;
+    }
+  }
+  #endif
   #if SURF_Q < 1
   amp = 0.0;
   #endif
@@ -683,9 +721,9 @@ void clothSurface(inout Surf s) {
   fuzz += tear.y;
 
   s.dH = vec2(0.0);
-  if (uClUv > 0.0) s.dH = amp * fW * vec2(dot(dh, dFdx(uv)), dot(dh, dFdy(uv)));
+  if (uClUv > 0.0) s.dH = vec2(dot(dh * amp * fW + mdh * mAmp, dFdx(uv)), dot(dh * amp * fW + mdh * mAmp, dFdy(uv)));
   s.albedo = col; s.rough = rough; s.metal = 0.0;
-  s.grad = (U * dh.x + V * dh.y) * amp * fW + gw;
+  s.grad = (U * (dh.x * amp * fW + mdh.x * mAmp) + V * (dh.y * amp * fW + mdh.y * mAmp)) + gw;
   s.ao = 1.0 - 0.4 * valley * (0.5 + fold) - 0.3 * shadowLine;
   #ifdef CHAR_BODY
   s.dH += sChSlope(cm.rg);
@@ -706,7 +744,7 @@ void clothSurface(inout Surf s) {
     // cloth soaks in patches with an edge; soaked cloth is darker, more saturated and lies flatter.
     // Knit clings and takes a slight sheen along its ridges.
     // (rain lands on the shoulders and the top of the back first: they are always the darkest)
-    float k = w * smoothstep(0.25, 0.6, lf * 0.55 + (1.0 - fN) * 0.15 + w * 0.6 + 0.3 * smoothstep(1.3, 1.45, pr.y)) * (1.0 - tape);
+    float k = w * smoothstep(0.25, 0.6, lf * 0.55 + (1.0 - fN) * 0.15 + w * 0.6 + smoothstep(1.3, 1.45, pr.y) * (0.25 + 0.45 * smoothstep(0.15, 0.7, gNw.y))) * (1.0 - tape);
     s.albedo = sSat(s.albedo, 1.0 + 0.3 * k) * mix(1.0, kind == 3 ? 0.7 : 0.5, k);
     s.rough = mix(s.rough, s.rough * (kind == 4 ? 0.5 : 0.66), k);
     if (kind == 4) s.rough = mix(s.rough, 0.3, k * crest * 0.8);
