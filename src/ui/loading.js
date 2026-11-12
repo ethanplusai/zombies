@@ -25,7 +25,7 @@ export const TIPS = [
   { key: 'With the power on, the upgrade bench makes any gun stronger for 4000.' },
   { key: "Hold Shift to sprint, but you can't shoot while you're sprinting.", touch: "Push the stick all the way to sprint, but you can't shoot while you're sprinting." },
   { key: 'Hold F at a broken window to nail the boards back: 10 points a board, up to 200 a round.', touch: 'Hold REPAIR at a broken window to nail the boards back: 10 points a board, up to 200 a round.' },
-  { key: 'Pistol ammo is 250 at the wall. Spend early on a better gun, then keep it fed.' },
+  { key: "The ammo crate out front fills whatever gun you're holding. Pistol ammo is 250; bigger guns cost more." },
   { key: 'Power-ups glow on the ground for 25 seconds. Walk over one to take it.' },
 ];
 

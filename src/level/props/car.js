@@ -22,12 +22,19 @@ import { VBuf, panelize, gridNormals, bowl, lensPlate, registerVehicle, setTestV
 // ride height, its lamps (lamp: 'quad' twin oblongs | 'rect' | 'round', lampW x lampH), its grille
 // ('slats' | 'crate' | 'bars' | 'slot'), its tail cluster ('wide' | 'tall' | 'wrap'), its bumpers.
 export const CAR_TYPES = {
-  sedan: { L: 4.72, W: 1.82, wb: 2.78, fo: 0.92, wr: 0.36, sill: 0.18, hoodF: 0.7, hoodR: 0.93, cowlX: 0.86, belt: 0.93, roofY: 1.44, roofF: 0.2, roofR: -1.0, rearBaseX: -1.72, deckY: 0.95, tailY: 0.9, pillarC: 0.2, lamp: 'quad', lampW: 0.42, lampH: 0.125, grille: 'slats', tailLamp: 'wide' },
-  hatch: { L: 4.05, W: 1.74, wb: 2.56, fo: 0.76, wr: 0.33, sill: 0.17, hoodF: 0.72, hoodR: 0.95, cowlX: 0.72, belt: 0.95, roofY: 1.47, roofF: 0.12, roofR: -1.45, rearBaseX: -1.93, deckY: 0.95, tailY: 0.93, pillarC: 0.14, lamp: 'rect', lampW: 0.3, lampH: 0.135, grille: 'slot', tailLamp: 'wrap' },
+  sedan: { L: 4.72, W: 1.82, wb: 2.78, fo: 0.92, wr: 0.36, sill: 0.18, hoodF: 0.7, hoodR: 0.93, cowlX: 0.86, belt: 0.93, roofY: 1.44, roofF: 0.2, roofR: -1.0, rearBaseX: -1.72, deckY: 0.95, tailY: 0.9, pillarC: 0.2, lamp: 'quad', lampW: 0.42, lampH: 0.125, grille: 'slats', tailLamp: 'wide',
+    // (a saloon's dressed tail: a reflector panel in a bright frame between the lamps, the lock and the maker's bar on the lid)
+    look: { tailDress: 'panel' } },
+  hatch: { L: 4.05, W: 1.74, wb: 2.56, fo: 0.76, wr: 0.33, sill: 0.17, hoodF: 0.72, hoodR: 0.95, cowlX: 0.72, belt: 0.95, roofY: 1.47, roofF: 0.12, roofR: -1.45, rearBaseX: -1.93, deckY: 0.95, tailY: 0.93, pillarC: 0.14, lamp: 'rect', lampW: 0.3, lampH: 0.135, grille: 'slot', tailLamp: 'wrap',
+    // (a small car somebody cared about: a black tailgate strip with its handle, a lip over the rear
+    // glass, two driving lamps on the front bumper, mud flaps)
+    look: { tailDress: 'strip', spots: true, flaps: true, lip: true } },
   suv: { L: 4.85, W: 1.94, wb: 2.94, fo: 0.84, wr: 0.425, sill: 0.27, hoodF: 0.98, hoodR: 1.16, cowlX: 0.84, belt: 1.16, roofY: 1.8, roofF: 0.3, roofR: -2.0, rearBaseX: -2.33, deckY: 1.16, tailY: 1.14, pillarC: 0.16, rack: true, tum: 0.2, lamp: 'rect', lampW: 0.22, lampH: 0.16, grille: 'bars', tailLamp: 'tall', steelBump: true,
     // (how it is drawn where that may differ from the collider's boxes: an upright off-roader on tall tyres)
     look: { roofF: 0.44, roofR: -2.2, tum: 0.11, sill: 0.33, wr: 0.445, hoodF: 1.03, flare: true, rackKind: 'basket', pillarC: 0.2 } },
-  pickup: { L: 5.5, W: 1.98, wb: 3.5, fo: 0.95, wr: 0.445, sill: 0.31, hoodF: 1.04, hoodR: 1.2, cowlX: 1.2, belt: 1.2, roofY: 1.84, roofF: 0.68, roofR: -0.42, rearBaseX: -0.62, deckY: 1.22, tailY: 1.22, pillarC: 0.12, bed: true, tum: 0.2, lamp: 'round', lampW: 0.19, lampH: 0.19, grille: 'crate', tailLamp: 'tall', steelBump: true },
+  pickup: { L: 5.5, W: 1.98, wb: 3.5, fo: 0.95, wr: 0.445, sill: 0.31, hoodF: 1.04, hoodR: 1.2, cowlX: 1.2, belt: 1.2, roofY: 1.84, roofF: 0.68, roofR: -0.42, rearBaseX: -0.62, deckY: 1.22, tailY: 1.22, pillarC: 0.12, bed: true, tum: 0.2, lamp: 'round', lampW: 0.19, lampH: 0.19, grille: 'crate', tailLamp: 'tall', steelBump: true,
+    // (a working truck's face: the grille runs down to the bumper, a parking lamp under each headlamp)
+    look: { faceDrop: 0.19 } },
   wagon: { L: 4.9, W: 1.84, wb: 2.9, fo: 0.92, wr: 0.357, sill: 0.18, hoodF: 0.72, hoodR: 0.94, cowlX: 0.92, belt: 0.94, roofY: 1.5, roofF: 0.3, roofR: -2.05, rearBaseX: -2.36, deckY: 0.94, tailY: 0.92, pillarC: 0.14, rack: true, lamp: 'quad', lampW: 0.4, lampH: 0.12, grille: 'crate', tailLamp: 'tall',
     // (a long low estate: fast screen, the roof falling to a raked tailgate)
     look: { roofF: 0.16, roofR: -1.8, roofDrop: 0.07, tum: 0.34, hoodF: 0.68, rackKind: 'rails' } },
@@ -733,24 +740,38 @@ function carMeshes(t, o, lod) {
     if (near && steelBump) for (const z of [-0.34, 0.34]) body.add(box(0.03, 0.15, 0.06), st([0.012, 0.012, 0.013], 1), M(h + 0.066, yF, z)); // over-riders
 
     // ---- nose: the band the lamps and the grille stand in, a painted lip over it, the grille by type
-    body.add(box(0.05, 0.21, noseHW * 2 - 0.2), S_BLACK, M(h - 0.02, lampY, 0));
+    const drop = t.faceDrop || 0; // how far the band and the grille reach below the lamps' own band
+    body.add(box(0.05, 0.21 + drop, noseHW * 2 - 0.2), S_BLACK, M(h - 0.02, lampY - drop / 2, 0));
     body.add(box(0.036, 0.009, (lampZ + LW / 2) * 2 + 0.03), S_PAINT, M(h + 0.004, lampY + 0.1095, 0));
     if (near) {
-      body.add(box(0.07, 0.006, noseHW * 2 - 0.16), S_CHROME, M(h + 0.022, lampY - 0.108, 0));
+      body.add(box(0.07, 0.006, noseHW * 2 - 0.16), S_CHROME, M(h + 0.022, lampY - 0.108 - drop, 0));
       const GR = st([0.2, 0.21, 0.22], 2), gx = h + 0.03;
       const surround = (tk, style) => {
-        for (const dy of [-1, 1]) body.add(box(0.03, tk, gH * 2 + tk), style, M(h + 0.042, lampY + dy * (0.1 - tk / 2), 0));
-        for (const dz of [-1, 1]) body.add(box(0.03, 0.2, tk), style, M(h + 0.042, lampY, dz * gH));
+        for (const dy of [-1, 1]) body.add(box(0.03, tk, gH * 2 + tk), style, M(h + 0.042, lampY - drop / 2 + dy * (0.1 + drop / 2 - tk / 2), 0));
+        for (const dz of [-1, 1]) body.add(box(0.03, 0.2 + drop, tk), style, M(h + 0.042, lampY - drop / 2, dz * gH));
       };
       if (t.grille === 'slats') {
         for (let k = 0; k < 6; k++) body.add(box(0.034, 0.007, gH * 2 - 0.02), GR, M(gx, lampY - 0.07 + 0.028 * k, 0, 0, 0, 0.4));
         surround(0.01, S_CHROME);
         body.add(box(0.016, 0.045, 0.085), S_CHROME, M(h + 0.052, lampY, 0)); // the maker's badge
       } else if (t.grille === 'crate') {
-        for (let k = 0; k < 3; k++) body.add(box(0.03, 0.012, gH * 2 - 0.02), S_CHROME, M(gx + 0.008, lampY - 0.05 + 0.05 * k, 0));
+        const nh = 3 + Math.round(drop / 0.05);
+        for (let k = 0; k < nh; k++) body.add(box(0.03, 0.012, gH * 2 - 0.02), S_CHROME, M(gx + 0.008, lampY + 0.05 - 0.05 * k, 0));
         const nv = Math.round((gH * 2) / 0.07);
-        for (let k = 1; k < nv; k++) body.add(box(0.02, 0.185, 0.006), GR, M(gx, lampY, -gH + (gH * 2 * k) / nv));
+        for (let k = 1; k < nv; k++) body.add(box(0.02, 0.185 + drop, 0.006), GR, M(gx, lampY - drop / 2, -gH + (gH * 2 * k) / nv));
         surround(0.02, S_CHROME);
+        if (drop) {
+          // the bar across the middle in the body's colour with the maker's letters' plate on it, and
+          // under each headlamp an oblong parking lamp in a bright frame
+          body.add(box(0.04, 0.05, gH * 2 - 0.02), S_PAINT, M(gx + 0.012, lampY - drop / 2 - 0.02, 0));
+          body.add(box(0.012, 0.03, 0.3), S_CHROME, M(gx + 0.034, lampY - drop / 2 - 0.02, 0));
+          for (const s of [1, -1]) {
+            const yp = lampY - 0.105 - drop / 2;
+            body.add(box(0.03, drop - 0.05, LW + 0.03), S_CHROME, M(h + 0.02, yp, s * lampZ));
+            body.add(box(0.03, drop - 0.075, LW + 0.004), st([0.75, 0.6, 0.35], 2), M(h + 0.026, yp, s * lampZ));
+            glass.add(lensPlate(LW, drop - 0.08, 6, 'y', 0.004, 0.0012, 6), { color: AMBERC, a: [0.86, 0.1, -99, 0] }, M(h + 0.043, yp, s * lampZ));
+          }
+        }
       } else if (t.grille === 'bars') {
         const nb = 7, pitch = (gH * 2) / nb;
         for (let k = 0; k < nb; k++) body.add(box(0.05, 0.19, pitch * 0.62), S_PAINT, M(gx + 0.002, lampY, -gH + pitch * (k + 0.5)));
@@ -762,8 +783,51 @@ function carMeshes(t, o, lod) {
         body.add(cyl(0.032, 0.032, 0.012, 12).rotateZ(Math.PI / 2), S_CHROME, M(h + 0.034, lampY + 0.045, 0));
       }
       // a tall nose has an intake between the bumper and the band
-      if (steelBump) body.add(box(0.03, 0.075, noseHW * 2 - 0.7), st([0.008, 0.008, 0.009], 1), M(h - 0.004, (lampY - 0.105 + yF + bumpH) / 2, 0));
-    } else body.add(box(0.02, 0.1, gH * 2 - 0.04), st([0.1, 0.1, 0.11], 2), M(h + 0.012, lampY, 0));
+      if (steelBump && !drop) body.add(box(0.03, 0.075, noseHW * 2 - 0.7), st([0.008, 0.008, 0.009], 1), M(h - 0.004, (lampY - 0.105 + yF + bumpH) / 2, 0));
+    } else body.add(box(0.02, 0.1 + drop, gH * 2 - 0.04), st([0.1, 0.1, 0.11], 2), M(h + 0.012, lampY - drop / 2, 0));
+
+    // ---- the tail between the lamps, by type, leaning with the panel as the lamps do
+    if (t.tailDress && crushed <= 0.25) {
+      const panel = t.tailDress === 'panel';
+      const LWt = panel ? 0.42 : 0.34, Ht = panel ? 0.14 : 0.125, yc = t.tailY - 0.13;
+      const gz = tailHW - (panel ? 0.29 : 0.235) - LWt / 2 - 0.014; // half the width between the lamps' inner edges
+      const xa = tailX(yc - Ht / 2), xb = tailX(yc + Ht / 2);
+      const m = M((xa + xb) / 2, yc, 0, 0, Math.PI, Math.atan2(xb - xa, Ht));
+      const at = (lm) => new Matrix4().multiplyMatrices(m, lm);
+      body.add(box(0.024, Ht + 0.016, gz * 2), S_BLACK, at(M(-0.003, 0, 0)));
+      if (panel) {
+        // a ribbed red reflector either side of the lock, bright strips over and under
+        for (const sz of [1, -1]) {
+          if (near) glass.add(lensPlate(gz - 0.06, Ht - 0.02, 9, 'z', 0.006, 0.0015, 7), { color: TAILC, a: [0.92, 0.07, -99, 0] }, at(M(0.014, 0, sz * (gz / 2 + 0.02))));
+          else body.add(box(0.016, Ht - 0.02, gz - 0.06), LENS(TAILC), at(M(0.006, 0, sz * (gz / 2 + 0.02))));
+        }
+        for (const dy of [-1, 1]) body.add(box(0.01, 0.006, gz * 2 + 0.004), S_CHROME, at(M(0.014, dy * (Ht / 2 + 0.004), 0)));
+        body.add(box(0.014, Ht - 0.03, 0.07), S_CHROME, at(M(0.012, 0, 0)));
+        if (near) body.add(cyl(0.011, 0.011, 0.012, 8).rotateZ(Math.PI / 2), S_BLACK, at(M(0.02, 0, 0)));
+        // the maker's bar on the lid's edge
+        body.add(box(0.012, 0.022, 0.26), S_CHROME, M(tailX(t.tailY - 0.03) - 0.006, t.tailY - 0.03, 0));
+      } else {
+        // a ribbed black strip, the gate's handle in the middle, the model's plate to one side
+        if (near) for (let k = 0; k < 4; k++) body.add(box(0.008, 0.008, gz * 2 - 0.02), st([0.03, 0.03, 0.032], 1), at(M(0.012, -Ht / 2 + 0.02 + k * (Ht - 0.04) / 3, 0)));
+        body.add(box(0.016, 0.034, 0.17), S_CHROME, at(M(0.014, -0.012, 0)));
+        body.add(box(0.012, 0.03, 0.15), S_CHROME, at(M(0.012, 0.02, gz - 0.12)));
+      }
+      // a red reflector low at each corner of the panel
+      for (const sz of [1, -1]) body.add(box(0.012, 0.035, 0.11), LENS(TAILC), M(tailX(t.tailY - 0.36) - 0.006, t.tailY - 0.36, sz * (tailHW - 0.2)));
+    }
+    // a black lip across the roof's trailing edge
+    if (t.lip && crushed <= 0.25) body.add(box(0.14, 0.02, t.W - 0.42), S_BLACK, M(t.roofR - 0.07, t.roofY - 0.012, 0, 0, 0, 0.14));
+    // two round driving lamps stood on the front bumper
+    if (t.spots && crushed <= 0.25) for (const z of [-0.24, 0.24]) {
+      const x0 = h + 0.07, y0 = yF + bumpH + 0.075;
+      body.add(box(0.02, 0.06, 0.02), S_BLACK, M(x0 - 0.02, y0 - 0.07, z));
+      body.add(cyl(0.078, 0.066, 0.06, near ? 16 : 10).rotateZ(Math.PI / 2), S_BLACK, M(x0 - 0.02, y0, z));
+      if (near) {
+        body.add(bowl(0.066, 0.066, 0.03, 3, 16, 2), st([0.9, 0.91, 0.93], 2), M(x0 + 0.004, y0, z));
+        glass.add(lensPlate(0.14, 0.14, 8, 'z', 0.007, 0.003, 2), { color: [0.03, 0.035, 0.035], a: [0.2, 0.22, -99, 0] }, M(x0 + 0.012, y0, z));
+        body.add(torus(0.072, 0.007, 5, 18), S_CHROME, M(x0 + 0.01, y0, z, 0, Math.PI / 2, 0));
+      } else body.add(cyl(0.07, 0.07, 0.01, 10).rotateZ(Math.PI / 2), LENS([0.42, 0.44, 0.46]), M(x0 + 0.012, y0, z));
+    }
 
     // ---- plates: a backing, the plate, two lamps over the rear one
     if (o.plateText) {
@@ -807,7 +871,7 @@ function carMeshes(t, o, lod) {
       // side repeater on the wing
       glass.add(lensPlate(0.05, 0.022, 3, 'y', 0.004), { color: AMBERC, a: [0.75, 0.4, -99, 0] }, M(fx + t.wr + 0.22, t.belt - 0.14, s * (S.skin(fx + t.wr + 0.22, t.belt - 0.14) + 0.003), 0, s > 0 ? -Math.PI / 2 : Math.PI / 2, 0));
       // mud flaps behind the wheels of the working vehicles
-      if (t.bed || t.sill > 0.25) for (const x of [fx, rx]) body.add(box(0.012, 0.26, 0.26), st([0.01, 0.01, 0.011], 1, 0), M(x - t.wr - 0.09, t.sill - 0.02, s * (hw - 0.17), 0, 0, -0.08));
+      if (t.bed || t.sill > 0.25 || t.flaps) for (const x of [fx, rx]) body.add(box(0.012, 0.26, 0.26), st([0.01, 0.01, 0.011], 1, 0), M(x - t.wr - 0.09, t.sill - 0.02, s * (hw - 0.17), 0, 0, -0.08));
     }
     // fuel filler: its door (a panel of the flank) and, open, the cap behind it
     if (near && o.fuelOpen) {
@@ -1339,6 +1403,8 @@ setTestVehicles((name) => {
       rec('hatch', { id: 'c3', paint: 'paintCarA', crushed: 0.75, rust: 0.7, dirt: 0.8 }, M(1.9, 1.2, 12.9, -0.03, 0.3, -0.02)),
     ];
   }
+  // one type alone, the same paint and wear whichever it is (to set them side by side in pictures)
+  if (CAR_TYPES[name]) return [rec(name, { id: 'solo', paint: 'paintCarE', plate: 'plateD', rust: 0.3, dirt: 0.4 }, M(-3, 0, 13.5, 0, Math.PI / 2, 0))];
   if (name === 'row') return ['sedan', 'hatch', 'suv', 'pickup', 'wagon'].map((type, i) => rec(type, { id: `row${i}`, paint: ['paintCarA', 'paintCarE', 'paintCarD', 'paintCarB', 'paintCarC'][i], plate: 'plateD', rust: 0.3, dirt: 0.4 }, M(-9 + i * 3.2, 0, 13.5, 0, Math.PI / 2, 0)));
   return [];
 });

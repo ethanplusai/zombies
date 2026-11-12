@@ -2,7 +2,7 @@
 // burning pools, the Roadflare in flight and burning, the Jumper's arc, the bloater's cloud, gibs
 // and stump spray. Everything here draws; damage is applied elsewhere (weapon/, zombie/).
 //
-//   G.fx.tracer(from, to, { upgraded })      G.fx.pellets(from, dirs)
+//   G.fx.tracer(from, to, { upgraded, weapon })      G.fx.pellets(from, dirs)
 //   G.fx.explosion(pos, radius, kind)        kind: 'frag' | 'decoy' | 'blast' | 'burst'
 //   G.fx.firePool(pos, radius, seconds, kind = 'molotov')   kind 'flare' burns red round a flare
 //   G.fx.arc(points)                         G.fx.flare(pos, seconds = 6)
@@ -17,7 +17,7 @@ import { readVec } from './fxlights.js';
 import { P_CELL } from './atlas.js';
 import { goreOf } from './decals.js';
 import { tuning } from '../game/tuning.js';
-import { TRACER_COLOR } from '../weapon/models/upgrade.js';
+import { TRACER_COLOR, upgradeLook } from '../weapon/models/upgrade.js';
 
 // ---- pure parts (tests/fx.test.js) -----------------------------------------------------------------
 // Does round number `n` (1-based, counted while the trigger is held) of this weapon carry a tracer?
@@ -45,7 +45,7 @@ export function emitCount(acc, rate, dt, max = 24) {
   return n > max ? max : n;
 }
 
-const WARM = TRACER_COLOR.warm; const VIOLET = TRACER_COLOR.violet;
+const WARM = TRACER_COLOR.warm;
 const ARC = [0.5, 0.72, 1];
 const FLARE_RED = [1, 0.16, 0.1];
 const TAU = Math.PI * 2;
@@ -100,17 +100,17 @@ export function createCombat(G, fx, K) {
   function tracer(from, to, o) {
     readVec(from, A); readVec(to, B);
     const up = !!(o && o.upgraded);
-    streak(A, B, up ? VIOLET : WARM, 0.03, up ? 40 : 30, 150, 6, 0.5);
+    streak(A, B, up ? upgradeLook(o.weapon).tracer : WARM, 0.03, up ? 40 : 30, 150, 6, 0.5); // an upgraded round flies in its weapon's colour
   }
   // one faint streak per pellet, to where each lands
-  function pelletTo(from, to, up) { streak(from, to, up ? VIOLET : WARM, 0.012, up ? 14 : 9, 150, 2.5, 0.4); }
+  function pelletTo(from, to, up, weapon) { streak(from, to, up ? upgradeLook(weapon).tracer : WARM, 0.012, up ? 14 : 9, 150, 2.5, 0.4); }
   function pellets(from, dirs, o) {
     readVec(from, A);
     for (let i = 0; i < dirs.length; i++) {
       readVec(dirs[i], Q).normalize();
       const hit = levelRay(A, Q, 30);
       if (hit && hit.pos) readVec(hit.pos, B); else B.copy(A).addScaledVector(Q, 30);
-      pelletTo(A, B, !!(o && o.upgraded));
+      pelletTo(A, B, !!(o && o.upgraded), o && o.weapon);
     }
   }
 
@@ -501,8 +501,9 @@ export function createCombat(G, fx, K) {
   }
 
   // ---- events ---------------------------------------------------------------------------------
-  // A shot's tracer waits for the frame's hits: it ends on the first zombie in line if there is one.
-  const pend = { on: false, from: new Vector3(), to: new Vector3(), upgraded: false, pellets: 0, pierce: false };
+  // A shot's tracer waits for the frame's hits: it ends on the furthest zombie the round hit (the only
+  // one, for a round that does not go through), unless the round went on to the world.
+  const pend = { on: false, from: new Vector3(), to: new Vector3(), upgraded: false, weapon: '', pellets: 0, far: new Vector3(), farOn: false, world: false };
   let run = 0; let lastShot = -1; let lastWeapon = '';
   if (G.events) {
     G.events.on('weapon:fire', (e) => {
@@ -514,20 +515,24 @@ export function createCombat(G, fx, K) {
       from.copy(pend.from); fromAt = clock.now;
       if (def && def.special) { pend.on = false; return; } // the arc and the flare draw themselves
       pend.pellets = e.pellets > 1 ? e.pellets : 0;
-      pend.upgraded = !!e.upgraded;
+      pend.upgraded = !!e.upgraded; pend.weapon = e.weapon;
       pend.on = pend.pellets > 0 || tracerDue(run, def && def.auto, pend.upgraded);
       if (!pend.on) return;
       const range = (def && def.range) || 60;
       const hit = levelRay(pend.from, Q, range);
       if (hit && hit.pos) readVec(hit.pos, pend.to); else pend.to.copy(pend.from).addScaledVector(Q, range);
-      pend.pierce = !!(def && def.pierce);
+      pend.farOn = false; pend.world = false;
     });
     G.events.on('hit:zombie', (e) => {
       if (!pend.on || !e || !e.pos || (e.source && e.source !== 'bullet')) return;
-      if (pend.pellets > 0) { pelletTo(pend.from, readVec(e.pos, B), pend.upgraded); return; }
-      if (!pend.pierce && readVec(e.pos, B).distanceToSquared(pend.from) < pend.to.distanceToSquared(pend.from)) pend.to.copy(B);
+      if (pend.pellets > 0) { pelletTo(pend.from, readVec(e.pos, B), pend.upgraded, lastWeapon); return; }
+      readVec(e.pos, B);
+      if (!pend.farOn || B.distanceToSquared(pend.from) > pend.far.distanceToSquared(pend.from)) { pend.far.copy(B); pend.farOn = true; }
     });
-    G.events.on('hit:world', (e) => { if (pend.on && pend.pellets > 0 && e && e.pos) pelletTo(pend.from, readVec(e.pos, B), pend.upgraded); });
+    G.events.on('hit:world', (e) => {
+      if (pend.on && pend.pellets === 0) pend.world = true;
+      if (pend.on && pend.pellets > 0 && e && e.pos) pelletTo(pend.from, readVec(e.pos, B), pend.upgraded, lastWeapon);
+    });
     G.events.on('explosion', (e) => { if (e && e.pos) explosion(e.pos, e.radius, e.kind); });
     G.events.on('fire:pool', (e) => { if (e && e.pos) firePool(e.pos, e.radius, e.seconds, e.kind); });
     G.events.on('weapon:arc', (e) => { if (e && e.points) arc(e.points); });
@@ -538,7 +543,11 @@ export function createCombat(G, fx, K) {
   }
 
   function update(dt) {
-    if (pend.on) { if (pend.pellets === 0) tracer(pend.from, pend.to, pend); pend.on = false; }
+    if (pend.on) {
+      if (pend.farOn && !pend.world) pend.to.copy(pend.far); // stopped in the last zombie it hit
+      if (pend.pellets === 0) tracer(pend.from, pend.to, pend);
+      pend.on = false;
+    }
     if (flash.left > 0) {
       flash.left -= dt;
       const ml = lights.muzzle; ml.pos.copy(flash.pos); ml.t0 = clock.now - 0.012; // held near full for its time

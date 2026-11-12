@@ -12,6 +12,7 @@
 //
 // ids are binding; another module adds one by pushing onto HINTS.
 import { tuning } from '../game/tuning.js';
+import { crateCostOf } from '../game/purchases.js';
 
 const P = tuning.points || { hit: 10, kill: 60, headshotKill: 100 };
 const BENCH_COST = (tuning.economy && tuning.economy.bench && tuning.economy.bench.cost) || 4000;
@@ -51,11 +52,13 @@ const focusIs = (G, a, b) => { const f = G.game && G.game.focus; return !!f && (
 
 // The wall to send the player to: the nearest affordable wall that sells for a gun they hold, else the nearest such
 // wall, else the nearest affordable wall of any kind. (A wall is an interactable of kind wallAmmo or wallWeapon.)
+// The ammo crate (wallAmmo) sells for the gun in hand, at that gun's price; one naming a gun sells for that gun.
 const holds = (slots, id) => {
   if (!Array.isArray(slots)) return true;
   for (let i = 0; i < slots.length; i++) if (slots[i] && slots[i].id === id) return true;
   return false;
 };
+const holdsAny = (slots) => !Array.isArray(slots) || slots.some(Boolean);
 export function wallTarget(G) {
   const its = interactables(G), p = playerPos(G);
   const slots = G.weapon && G.weapon.slots, pts = G.game && G.game.points;
@@ -64,8 +67,10 @@ export function wallTarget(G) {
     const it = its[i];
     if (!it || !it.pos || (it.kind !== 'wallAmmo' && it.kind !== 'wallWeapon') || !live(it)) continue;
     const d = p ? dist2(p, it.pos) : 0;
-    const afford = !(pts < it.cost);
-    if (holds(slots, it.kind === 'wallAmmo' ? 'pistol' : it.weapon)) {
+    const crate = it.kind === 'wallAmmo';
+    const cost = crate ? crateCostOf(it, G.weapon) : it.cost;
+    const afford = !(pts < cost);
+    if (crate && !it.weapon ? holdsAny(slots) : holds(slots, it.weapon)) {
       if (d < rd) { rd = d; r = it; }
       if (afford && d < ad) { ad = d; a = it; }
     }

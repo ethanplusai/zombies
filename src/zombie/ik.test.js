@@ -227,3 +227,120 @@ describe('falls', { timeout: 60000 }, () => {
     expect(f(KINDS.brute, 2.2).restyle('blast')).toBe(false);
   });
 });
+
+// ---- how the body carries its weight: pelvis, turns, changes of pace ---------------------------
+import { B } from './skeleton.js';
+
+describe('weight', { timeout: 60000 }, () => {
+  const hipY = (z) => z.pose.wp[B.hips * 3 + 1];
+  // which way a bone faces in the zombie's own frame (0 = straight ahead, + to its left)
+  const facing = (z, b) => { const v = new Float32Array(3); vRot(v, z.pose.wq, b * 4, 0, 0, 1); return Math.atan2(v[0], v[2]); };
+  const pitch = (z, b) => { const v = new Float32Array(3); vRot(v, z.pose.wq, b * 4, 0, 1, 0); return Math.atan2(v[2], v[1]); };
+  // the manager's loop with a script: (t) -> { speed, turn (rad/s) }
+  const drive = (z, a, seconds, script, each) => {
+    for (let t = 0; t < seconds; t += 1 / 60) {
+      const c = script(t);
+      z.mesh.rotation.y += (c.turn || 0) / 60;
+      a.update(1 / 60, c.speed || 0, 0);
+      z.mesh.position.z += Math.cos(z.mesh.rotation.y) * a.rootSpeed / 60; z.mesh.position.x += Math.sin(z.mesh.rotation.y) * a.rootSpeed / 60;
+      if (each) each(t);
+    }
+  };
+  const twist = (z, a) => Math.max(...a.feet.map((f) => Math.abs(Math.atan2(Math.sin(f.yaw - z.mesh.rotation.y), Math.cos(f.yaw - z.mesh.rotation.y)))));
+
+  it('the pelvis rides each step without a jolt: no corner in its height at a footfall', () => {
+    for (const type of ['walker', 'armoured', 'bloater']) {
+      for (const seed of [3, 6, 11]) {
+        const { z, a } = make(seed, KINDS[type]);
+        a.set('walk');
+        let y1 = 0, y2 = 0, worst = 0, lo = 9, hi = 0;
+        drive(z, a, 6, () => ({ speed: tuning.zombies.types[type].speed[1] }), (t) => {
+          const y = hipY(z);
+          if (t > 2) { worst = Math.max(worst, Math.abs(y - 2 * y1 + y2) * 3600); lo = Math.min(lo, y); hi = Math.max(hi, y); }
+          y2 = y1; y1 = y;
+        });
+        expect(worst, `${type} ${seed}`).toBeLessThan(60);       // m/s^2: a 20 mm drop in one frame is 72
+        expect(hi - lo, `${type} ${seed}`).toBeLessThan(0.1);    // and the bob stays a bob
+        expect(hi - lo, `${type} ${seed}`).toBeGreaterThan(0.01);
+      }
+    }
+  });
+  it('a runner held to a walk walks: its hips stay up through slowing, stopping and setting off again', () => {
+    for (const seed of [3, 6]) {
+      const { z, a } = make(seed, KINDS.runner);
+      a.set('run');
+      let stand = 0, lo = 9;
+      drive(z, a, 1, () => ({ speed: 0 }), () => { stand = hipY(z); });
+      drive(z, a, 10, (t) => ({ speed: t < 2 ? 3.8 : t < 4 ? 1.1 : t < 6 ? 3.8 : t < 8 ? 0 : 3.8 }), () => { lo = Math.min(lo, hipY(z)); });
+      expect(lo, `seed ${seed}`).toBeGreaterThan(stand * 0.68);
+    }
+  });
+  it('a walker sets off with a step, not by sliding away from its feet', () => {
+    for (const seed of [3, 6, 9]) {
+      const { z, a } = make(seed, KINDS.walker);
+      a.set('walk');
+      let stand = 0, lo = 9, firstLift = -1;
+      drive(z, a, 1, () => ({ speed: 0 }), () => { stand = hipY(z); });
+      drive(z, a, 2, () => ({ speed: 1.3 }), (t) => { lo = Math.min(lo, hipY(z)); if (firstLift < 0 && a.feet.some((f) => !f.planted)) firstLift = t; });
+      expect(firstLift, `seed ${seed}`).toBeLessThan(0.12);
+      expect(lo, `seed ${seed}`).toBeGreaterThan(stand * 0.88);
+    }
+  });
+  it('turned by the simulation, it walks its feet round: no leg is left twisted behind', () => {
+    for (const [type, speed] of [['walker', 0], ['walker', 0.4], ['brute', 0], ['bloater', 0.3]]) {
+      const { z, a } = make(6, KINDS[type]);
+      a.set(tuning.zombies.types[type].gait);
+      drive(z, a, 1.5, () => ({ speed: 1.2 }));
+      let worst = 0;
+      drive(z, a, 3, () => ({ speed, turn: 2.4 }), () => { worst = Math.max(worst, twist(z, a)); });
+      expect(worst, `${type} at ${speed}`).toBeLessThan(1.4);      // rad: past 1.6 the foot points backward
+      drive(z, a, 1.5, () => ({ speed: 0 }));
+      expect(twist(z, a), `${type} at rest`).toBeLessThan(0.75);
+    }
+  });
+  it('a turn reaches the chest and the head late, and they settle back afterwards', () => {
+    const { z, a } = make(4, KINDS.walker);
+    a.set('walk');
+    drive(z, a, 3, () => ({ speed: 1.3 }));
+    let c0 = 0, h0 = 0, n = 0;
+    drive(z, a, 2, () => ({ speed: 1.3 }), () => { c0 += facing(z, B.spine2); h0 += facing(z, B.head); n++; });
+    c0 /= n; h0 /= n;
+    let c1 = 0, h1 = 0; n = 0;
+    drive(z, a, 1.3, () => ({ speed: 1.3, turn: 2 }), (t) => { if (t > 0.9) { c1 += facing(z, B.spine2); h1 += facing(z, B.head); n++; } });
+    c1 /= n; h1 /= n;
+    // turning to its left, the chest and the head are still turned to the right of where the feet are going
+    expect(c1 - c0).toBeLessThan(-0.08);
+    expect(h1 - h0).toBeLessThan(c1 - c0 - 0.02);
+    let c2 = 0; n = 0;
+    drive(z, a, 3, () => ({ speed: 1.3 }), (t) => { if (t > 1.5) { c2 += facing(z, B.spine2); n++; } });
+    expect(Math.abs(c2 / n - c0)).toBeLessThan(0.05);
+  });
+  it('leans into picking up speed and rocks back when it pulls up', () => {
+    const { z, a } = make(4, KINDS.walker);
+    a.set('walk');
+    drive(z, a, 1, () => ({ speed: 0 }));
+    const rest = pitch(z, B.spine2);
+    let go = 0, n = 0;
+    drive(z, a, 0.6, () => ({ speed: 1.6 }), (t) => { if (t > 0.2) { go += pitch(z, B.spine2); n++; } });
+    expect(go / n - rest).toBeGreaterThan(0.04);
+    drive(z, a, 3, () => ({ speed: 1.6 }));
+    let steady = 0; n = 0;
+    drive(z, a, 2, () => ({ speed: 1.6 }), () => { steady += pitch(z, B.spine2); n++; });
+    steady /= n;
+    let stop = 0; n = 0;
+    drive(z, a, 0.45, () => ({ speed: 0 }), (t) => { if (t > 0.15) { stop += pitch(z, B.spine2); n++; } });
+    expect(stop / n - steady).toBeLessThan(-0.04);
+  });
+  it('no two walk in step: each seed has its own cadence', () => {
+    const cadence = [3, 4, 5, 6, 7, 8].map((seed) => {
+      const { z, a } = make(seed, KINDS.walker);
+      a.set('walk');
+      let steps = 0;
+      a.onStep = () => { steps++; };
+      drive(z, a, 10, () => ({ speed: 1.3 }));
+      return steps / 10;
+    });
+    for (const c of cadence) { expect(c).toBeGreaterThan(1.4); expect(c).toBeLessThan(2.7); }   // steps a second: long and slow
+    expect(Math.max(...cadence) - Math.min(...cadence)).toBeGreaterThan(0.2);
+  });
+});

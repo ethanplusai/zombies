@@ -13,7 +13,10 @@ export function statsFor(slot) {
   const base = WEAPONS[slot.id];
   const up = slot.upgraded ? base.upgraded : null;
   const d = up
-    ? { ...base, name: up.name, damage: up.damage, mag: up.mag, reserve: up.reserve, maxReserve: up.maxReserve, tracer: up.tracer, finish: up.finish, upgraded: true }
+    ? {
+      ...base, name: up.name, damage: up.damage, mag: up.mag, reserve: up.reserve, maxReserve: up.maxReserve, tracer: up.tracer, finish: up.finish,
+      penetration: up.penetration, pierce: up.penetration.bodies, upgraded: true,
+    }
     : { ...base, upgraded: false };
   return applyAttachments(d, slot.attachments);
 }

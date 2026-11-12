@@ -1,6 +1,7 @@
 // Menu screens: title, paused, dead, settings, controls. DOM only; game actions arrive via `actions`.
 import { createWordmark } from './wordmark.js';
-import { formatPoints, QUALITIES, QUALITY_LABELS, qualityLabel, needsQualityConfirm, GORE, ASSIST_NAMES, CONTROLS, SETTING_RANGES } from './format.js';
+import { controlsColumns, createInfoPanel } from './infoPanel.js';
+import { formatPoints, QUALITIES, QUALITY_LABELS, qualityLabel, needsQualityConfirm, GORE, ASSIST_NAMES, SETTING_RANGES } from './format.js';
 
 const h = (tag, cls, text) => {
   const e = document.createElement(tag);
@@ -23,18 +24,11 @@ function row(label, hint, onClick, opts = {}) {
 const leaderLine = (cls, left, right) => kids(h('div', cls), left, h('span', 'lead'), right);
 
 
-// The controls card: two columns, keyboard and touch. CSS puts the active device's column first.
+// The controls card on its own (the Controls screen): two columns, keyboard and touch. CSS puts the active device's column first.
 function controlsCard() {
   const card = h('div', 'gs-card');
   card.appendChild(h('p', 'gs-eyebrow', 'House rules'));
-  const cols = h('div', 'gs-card-cols');
-  for (const [cls, title, field] of [['kb', 'Keyboard', 'key'], ['tc', 'Touch', 'touch']]) {
-    const col = h('div', `gs-card-col ${cls}`);
-    col.appendChild(h('h3', 'gs-card-h', title));
-    for (const c of CONTROLS) kids(col, kids(h('div', 'r'), h('span', 'a', c.name), h('span', 'k', c[field])));
-    cols.appendChild(col);
-  }
-  card.appendChild(cols);
+  card.appendChild(controlsColumns());
   return card;
 }
 
@@ -74,7 +68,7 @@ export function createMenus(G, root, { settings, actions, sample }) {
     }
     kids(col, exit, mark, premise, list);
     screens.title.list = list;
-    screens.title.el.appendChild(kids(h('aside', 'gs-cardwrap'), controlsCard()));
+    screens.title.el.appendChild(kids(h('aside', 'gs-cardwrap'), createInfoPanel().el));
   }
 
   // ---- paused ----
@@ -87,7 +81,7 @@ export function createMenus(G, root, { settings, actions, sample }) {
       row('Settings', 'Picture · Controls · Sound', () => show('settings')));
     kids(col, heading('Shift paused', 'On break'), list);
     screens.paused.list = list;
-    screens.paused.el.appendChild(kids(h('aside', 'gs-cardwrap'), controlsCard()));
+    screens.paused.el.appendChild(kids(h('aside', 'gs-cardwrap'), createInfoPanel().el));
   }
 
   // ---- dead ----

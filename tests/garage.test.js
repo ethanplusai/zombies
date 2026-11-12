@@ -40,26 +40,46 @@ describe('garage and world objects', () => {
     for (const id of Object.values(economy.wallBuys)) expect(CHALKED, id).toContain(id);
     for (const k of economy.machineKinds) expect(BRANDS[k], k).toBeTruthy();
   });
-  it('the box jacks open while it rolls and offers, and is dark when gone', () => {
+  it('the box throws its doors open while it rolls and offers, and is dark when gone', () => {
     const rec = objectRecords().find((d) => d.id === 'box-garage');
     const m = mats();
     const box = rec.make(G(), m);
-    const lid = box.group.children[0];
+    const doors = box.group.children.filter((c) => c.children.length === 1).map((c) => c.children[0]);
     const run = (n, t0 = 0) => { for (let i = 0; i < n; i++) box.update(1 / 60, t0 + i / 60); };
     run(30);
-    expect(lid.position.y).toBeCloseTo(BOX.h, 2);
+    expect(doors).toHaveLength(2);
+    expect(box.open).toBeCloseTo(0, 2);
     expect(Math.max(...m.gain)).toBe(0); // gone: no light at all
     box.setState('idle'); run(30);
     expect(Math.max(...m.gain)).toBeGreaterThan(0.5);
     box.setState('rolling'); run(90, 1);
-    expect(lid.position.y).toBeGreaterThan(BOX.h + BOX.lift * 0.9);
-    box.setState('offering'); box.setWeapon('lmg'); run(30, 3);
-    expect(lid.position.y).toBeGreaterThan(BOX.h + BOX.lift * 0.9);
+    expect(box.open).toBeGreaterThan(0.9);
+    for (const d of doors) expect(d.rotation.x).toBeGreaterThan(Math.PI * 1.3); // right over, hanging down the sides
+    expect(box.showing).toBeTruthy(); // a weapon is being turned over above it
+    box.setWeapon('lmg'); box.setState('offering'); run(30, 3);
+    expect(box.open).toBeGreaterThan(0.9);
+    expect(box.showing).toBe('lmg');
+    box.taken(); run(2, 3.6);
+    expect(box.showing).toBe(null); // taken: nothing left hanging there
     box.setState('idle'); run(90, 4);
-    expect(lid.position.y).toBeCloseTo(BOX.h, 2);
+    expect(box.open).toBeCloseTo(0, 2);
     box.setState('moving'); run(10, 6);
+    expect(Math.max(...m.gain)).toBeGreaterThan(0); // red while it leaves
     box.reset(); run(5, 7);
     expect(box.state).toBe('gone');
+  });
+  it('only one box at a time holds the weapon display, and an offer that lapses lets it go', () => {
+    const m = mats(), g = G();
+    const [a, b] = ['box-garage', 'box-diner'].map((id) => objectRecords().find((d) => d.id === id).make(g, m));
+    const run = (box, n, t0 = 0) => { for (let i = 0; i < n; i++) box.update(1 / 60, t0 + i / 60); };
+    a.setState('rolling'); run(a, 20);
+    expect(a.showing).toBeTruthy();
+    expect(b.showing).toBe(null);
+    a.setWeapon('rifle'); a.setState('offering'); run(a, 20, 1);
+    a.setState('idle'); run(a, 120, 2); // the doors come down: the weapon goes back in
+    expect(a.showing).toBe(null);
+    b.setState('rolling'); run(b, 20, 5);
+    expect(b.showing).toBeTruthy();
   });
   it('machines are dead without the power, lit with it, dimmed with the lamp on once bought', () => {
     const rec = objectRecords().find((d) => d.id === 'longHaul');

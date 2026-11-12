@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createEvents } from '../src/core/events.js';
 import { createHints } from '../src/ui/hints.js';
-import { HINTS, HINT_IDS, parseCopy, plainCopy } from '../src/ui/hintDefs.js';
+import { HINTS, HINT_IDS, parseCopy, plainCopy, wallTarget } from '../src/ui/hintDefs.js';
 import { settingsRowSpecs } from '../src/ui/hints.js';
 import { createEndScreen } from '../src/ui/endscreen.js';
 import { denyText } from '../src/ui/format.js';
@@ -625,5 +625,35 @@ describe('objective: stragglers and the wall', () => {
       level: { doors: [{ id: 'd1', a: 'forecourt', b: 'diner', cost: 750, label: 'Diner', pos: [12, 1, -20], open: false }], power: { on: false } },
     };
     expect(objective(G).text).toBe('Open the Diner door — 750');
+  });
+});
+
+describe('wallTarget: the ammo crate sells for the gun in hand', () => {
+  const crate = { id: 'ammo-store', kind: 'wallAmmo', label: 'Ammo', pos: [3, 0, 3], cost: 250, enabled: () => true };
+  const smgWall = { id: 'wall-pike45', kind: 'wallWeapon', weapon: 'smg', pos: [40, 0, 0], cost: 1250, enabled: () => true };
+  const G = (held, other, points) => ({
+    game: { points },
+    player: { pos: [0, 0, 0] },
+    weapon: { id: held, slots: [{ id: held, mag: 0, reserve: 0 }, other ? { id: other, mag: 0, reserve: 0 } : null], slot: 0 },
+    level: { interactables: [crate, smgWall] },
+  });
+  it('holding two box guns (no pistol), the crate is still the wall for them', () => {
+    expect(wallTarget(G('lmg', 'battleRifle', 5000))).toBe(crate);
+  });
+  it('affordability uses the held gun\'s price, not the pistol\'s 250', () => {
+    // the LMG's crate price is 1000: at 300 points the crate is not affordable, so the nearest
+    // wall that sells for a held gun is still the crate (no affordable one), never another gun's wall
+    expect(wallTarget(G('lmg', null, 300))).toBe(crate);
+    // holding the SMG at 300 points: neither is affordable; the crate is nearer and sells for it
+    expect(wallTarget(G('smg', null, 300))).toBe(crate);
+  });
+  it('an affordable crate is preferred to an unaffordable nearer wall for a held gun', () => {
+    const near = { ...smgWall, pos: [1, 0, 1] };
+    const g = G('smg', 'pistol', 600);
+    g.level.interactables = [crate, near];
+    // the crate sells SMG ammo at 500 (affordable at 600); the nearer wall asks 1250
+    expect(wallTarget(g)).toBe(crate);
+    g.game.points = 499;
+    expect(wallTarget(g)).toBe(near); // neither affordable: the nearest that sells for a held gun
   });
 });

@@ -291,7 +291,7 @@ export function setQuadUv(geometry, first, rect) {
 }
 
 // ---- the material ------------------------------------------------------------------------------------
-export const CHANNELS = 40;
+export const CHANNELS = 56;
 let MATS = null;
 let nextChannel = 1;
 // a gain channel of the object material: channel() -> index; mats.gain[index] = 0..n

@@ -1,6 +1,7 @@
 // Weapons: fire control, reload, spread, recoil, hit scan, the arsenal around them, and the
 // weapon:* / hit:* events. Two layers:
-//  - pure (createWeaponState, step, spreadDeg, spreadDir, nearestHit, falloffScale, arcChain): no
+//  - pure (createWeaponState, step, spreadDeg, spreadDir, nearestHit, falloffScale, penetrationScale,
+//    arcChain): no
 //    three.js, no DOM, so vitest runs it. `step` runs on any object with the slot's state fields;
 //    its Def `T` says how the weapon fires (semi/auto, rpm, magazine or shell reload);
 //  - createWeapon(G): the factory that owns G.weapon. It holds the loadout (arsenal.js), reads
@@ -131,8 +132,9 @@ export function spreadDeg(s, ctx = {}, sp = SPREAD) {
     + (ctx.moving ? sp.move : 0) + (ctx.airborne ? sp.air : 0) + (s.bloom || 0);
 }
 
-// A unit direction uniformly distributed over the disc of the cone around fwd.
-export function spreadDir(fwd, deg, rng) {
+// A unit direction uniformly distributed over the disc of the cone around fwd. Pass `out` (an
+// [x,y,z] array, not fwd itself) to fill it instead of making a new one.
+export function spreadDir(fwd, deg, rng, out) {
   let [fx, fy, fz] = fwd;
   const fl = Math.hypot(fx, fy, fz) || 1;
   fx /= fl; fy /= fl; fz /= fl;
@@ -145,11 +147,19 @@ export function spreadDir(fwd, deg, rng) {
   const ang = ((deg * Math.PI) / 180) * Math.sqrt(rng.next());
   const th = rng.next() * Math.PI * 2;
   const c = Math.cos(ang), sn = Math.sin(ang), ct = Math.cos(th), st = Math.sin(th);
-  return [
-    fx * c + sn * (ux * ct + vx * st),
-    fy * c + sn * (uy * ct + vy * st),
-    fz * c + sn * (uz * ct + vz * st),
-  ];
+  const o = out || [0, 0, 0];
+  o[0] = fx * c + sn * (ux * ct + vx * st);
+  o[1] = fy * c + sn * (uy * ct + vy * st);
+  o[2] = fz * c + sn * (uz * ct + vz * st);
+  return o;
+}
+
+// Damage scale on the n-th zombie a round meets (0 = the first): pen.keep^n, or 0 once the round has
+// gone through pen.bodies zombies or travelled more than pen.reach m past the first one (`past`).
+export function penetrationScale(n, past, pen) {
+  if (n <= 0) return 1;
+  if (!pen || n > pen.bodies || past > pen.reach) return 0;
+  return pen.keep ** n;
 }
 
 // The nearer of a zombie hit and a world hit; malformed hits are ignored.
@@ -262,16 +272,23 @@ export function createWeapon(G, opts = {}) {
   const throwables = createThrowables(G, { emit, amount: amountFor });
 
   // Shot origin and aim: the player's un-bobbed eye and recoil-including forward; the camera if the
-  // player is missing.
+  // player is missing. Fills and returns one reused {eye, fwd}: read it before the next call.
+  const aimed = { eye: [0, 0, 0], fwd: [0, 0, -1] };
+  const set3 = (o, x, y, z) => { o[0] = x; o[1] = y; o[2] = z; };
   function aim() {
     const p = G.player;
-    if (p && !p.stub && p.eye && p.forward) return { eye: p.eye.slice(), fwd: p.forward.slice() };
+    if (p && !p.stub && p.eye && p.forward) {
+      set3(aimed.eye, p.eye[0], p.eye[1], p.eye[2]); set3(aimed.fwd, p.forward[0], p.forward[1], p.forward[2]);
+      return aimed;
+    }
     const cam = G.camera;
     if (cam && cam.matrixWorld) {
       const e = cam.matrixWorld.elements;
-      return { eye: [e[12], e[13], e[14]], fwd: [-e[8], -e[9], -e[10]] };
+      set3(aimed.eye, e[12], e[13], e[14]); set3(aimed.fwd, -e[8], -e[9], -e[10]);
+      return aimed;
     }
-    return { eye: [0, tuning.player.eye, 0], fwd: [0, 0, -1] };
+    set3(aimed.eye, 0, tuning.player.eye, 0); set3(aimed.fwd, 0, 0, -1);
+    return aimed;
   }
 
   function moveCtx() {
@@ -291,24 +308,30 @@ export function createWeapon(G, opts = {}) {
   }
 
   // The first zombie along the ray between `start` and `max` m from the eye, skipping ids already
-  // hit by this round (a cast from inside a body can find that body again).
+  // hit by this round (a cast from inside a body can find that body again). Returns the hit (and sets
+  // castDist to its distance from the eye) or null. Reuses one origin array: no allocation here.
+  const castO = [0, 0, 0];
+  let castDist = 0;
   function castZombie(eye, dir, start, max, exclude) {
     let at = start;
-    for (let k = 0; k < 6 && at < max; k++) {
-      const o = at > 0 ? [eye[0] + dir[0] * at, eye[1] + dir[1] * at, eye[2] + dir[2] * at] : eye;
+    for (let k = 0; k < 8 && at < max; k++) {
+      let o = eye;
+      if (at > 0) { castO[0] = eye[0] + dir[0] * at; castO[1] = eye[1] + dir[1] * at; castO[2] = eye[2] + dir[2] * at; o = castO; }
       const h = safeCast(G.zombies, o, dir, max - at);
       if (!h || !Number.isFinite(h.dist)) return null;
       const dist = at + h.dist;
       if (dist > max) return null;
-      if (!exclude.includes(h.id)) return { h, dist };
+      if (!exclude.includes(h.id)) { castDist = dist; return h; }
       at = dist + 0.3;
     }
     return null;
   }
 
   // Damage one zombie and report it: straight away for a single-ray shot, gathered per zombie for a
-  // shotgun's pellets (one hit:zombie per zombie per shot, damage summed).
-  function damageZombie(id, part, pos, amount, dir, D, source, agg) {
+  // shotgun's pellets (one hit:zombie per zombie per shot, damage summed). `agg` is a reused array of
+  // this shot's reports, emitted and cleared when the shot is done. `pierced`: the round reached this
+  // zombie through another one (the report says so: such a hit pays no hit points, only a kill's).
+  function damageZombie(id, part, pos, amount, dir, D, source, agg, pierced = false) {
     let res = null;
     const amt = amountFor(id, amount);
     try { res = G.zombies.damage(id, amt, part, dir); } catch (e) { warnOnce('zombies.damage threw', e); }
@@ -316,37 +339,48 @@ export function createWeapon(G, opts = {}) {
     const damage = res && Number.isFinite(res.damage) ? res.damage : amt * (head ? tuning.walker.headMultiplier : 1);
     const killed = !!(res && res.killed);
     if (agg) {
-      const e = agg.get(id);
-      if (e) {
-        e.damage += damage; e.killed = e.killed || killed;
+      for (let i = 0; i < agg.length; i++) {
+        const e = agg[i];
+        if (e.id !== id) continue;
+        e.damage += damage; e.killed = e.killed || killed; e.pierced = e.pierced && pierced;
         if (head) { e.part = 'head'; e.headshot = true; }
         return;
       }
-      agg.set(id, { id, pos, part, damage, killed, headshot: head, dir, weapon: D.id, source });
+      agg.push({ id, pos, part, damage, killed, headshot: head, dir, weapon: D.id, source, pierced });
       return;
     }
-    emit('hit:zombie', { id, pos, part, damage, killed, headshot: head, dir, weapon: D.id, source });
+    emit('hit:zombie', { id, pos, part, damage, killed, headshot: head, dir, weapon: D.id, source, pierced });
   }
 
-  // One ray (a bullet or a pellet): zombies in line up to the pierce count, else the world.
-  function trace(eye, dir, D, agg) {
-    const dirX = xyz(dir);
+  // One ray (a bullet or a pellet): the zombies in line it passes through (D.penetration: how many,
+  // how far, how much damage each keeps), stopped by the world. A round that is not used up on
+  // zombies marks the world where it stops. dirX is the shot's direction as {x,y,z} (the reports').
+  const hitIds = [];
+  function trace(eye, dir, dirX, D, agg) {
     const wHit = safeCast(G.level, eye, dir, D.range);
     const wd = wHit && Number.isFinite(wHit.dist) && wHit.dist <= D.range ? wHit.dist : Infinity;
-    const hitIds = [];
-    let left = (D.pierce || 0) + 1, at = 0, first = null;
-    while (left > 0) {
-      const z = castZombie(eye, dir, at, Math.min(D.range, wd), hitIds);
-      if (!z) break;
-      const h = z.h;
-      damageZombie(h.id, h.part, xyz(h.pos), D.damage * falloffScale(z.dist, D.falloff), dirX, D, 'bullet', agg);
-      if (!first) first = h;
+    const pen = D.penetration || null;
+    const most = (pen ? pen.bodies : D.pierce || 0) + 1;
+    const max = Math.min(D.range, wd);
+    hitIds.length = 0;
+    let n = 0, at = 0, firstAt = 0, first = null, spent = false;
+    while (n < most) {
+      const h = castZombie(eye, dir, at, max, hitIds);
+      if (!h) break;
+      const dist = castDist;
+      if (!first) { first = h; firstAt = dist; }
+      const k = pen ? penetrationScale(n, dist - firstAt, pen) : 1;
+      if (!(k > 0)) { spent = true; break; }
+      damageZombie(h.id, h.part, xyz(h.pos), D.damage * falloffScale(dist, D.falloff) * k, dirX, D, 'bullet', agg, n > 0);
       hitIds.push(h.id);
-      at = z.dist;
-      left--;
+      at = dist;
+      n++;
     }
+    // used up on zombies, or the wall is further past the first body than the round can reach
+    if (n >= most || (first && pen && wd - firstAt > pen.reach)) spent = true;
     if (first && D.special && D.special.kind === 'arc') arc(first, D, dirX);
-    if (left > 0 && wd < Infinity) {
+    hitIds.length = 0;
+    if (!spent && wd < Infinity) {
       emit('hit:world', { pos: xyz(wHit.pos), normal: xyz(wHit.normal) || { x: 0, y: 1, z: 0 }, surface: wHit.surface || 'concrete' });
     }
   }
@@ -375,7 +409,7 @@ export function createWeapon(G, opts = {}) {
     const s = cur();
     const { eye, fwd } = aim();
     const ctx = moveCtx();
-    const dir = spreadDir(fwd, spreadDeg({ bloom }, ctx, D.spread), rng);
+    const dir = spreadDir(fwd, spreadDeg({ bloom }, ctx, D.spread), rng, shotDir);
 
     const muzzle = viewCall((w) => w.muzzleWorld()) || { x: eye[0] + fwd[0] * 0.5, y: eye[1] + fwd[1] * 0.5 - 0.1, z: eye[2] + fwd[2] * 0.5 };
     const eject = viewCall((w) => w.ejectWorld());
@@ -402,11 +436,13 @@ export function createWeapon(G, opts = {}) {
       // the Roadflare is a lobbed round, not a hit scan: throwables.js flies it, bursts it and burns
       throwables.launch('flare', eye, dir, null, D.special, { damage: D.damage, weapon: D.id, upgraded: D.upgraded });
     } else if (D.pellets > 1) {
-      const agg = new Map();
-      for (let i = 0; i < D.pellets; i++) trace(eye, spreadDir(dir, D.spread.pellet || 0, rng), D, agg);
-      for (const e of agg.values()) emit('hit:zombie', e);
-    } else trace(eye, dir, D, null);
+      aggList.length = 0;
+      for (let i = 0; i < D.pellets; i++) trace(eye, spreadDir(dir, D.spread.pellet || 0, rng, pelletDir), fire.dir, D, aggList);
+      for (let i = 0; i < aggList.length; i++) emit('hit:zombie', aggList[i]);
+      aggList.length = 0;
+    } else trace(eye, dir, fire.dir, D, null);
   }
+  const shotDir = [0, 0, -1], pelletDir = [0, 0, -1], aggList = [];
 
   function checkAmmo(i) {
     const s = L.slots[i], D = defs[i];

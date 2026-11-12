@@ -100,3 +100,38 @@ describe('bot survival (no god mode)', () => {
     expect(player.bot.goal).toEqual([0, 0]); // stands
   });
 });
+
+describe('ammo for any held gun at the crate', () => {
+  const lmg = (o) => {
+    const s = setup({ zombies: [[0, 30]], pos: [2, 0, -12], ...o });
+    s.G.weapon = { ...s.G.weapon, id: 'lmg', def: { mag: 75, maxReserve: 300 }, ammo: { mag: 75, reserve: 6 }, slots: [{ id: 'lmg' }, { id: 'battleRifle' }] };
+    return s;
+  };
+  it('holding a box gun with no wall, it goes to the crate for ammo', () => {
+    const { brain, player, wallAmmo } = lmg({ points: 2000 });
+    brain.update(1 / 60);
+    expect(brain.mode).toBe('resupply');
+    const g = player.bot.goal;
+    expect(Math.hypot(wallAmmo.pos[0] - g[0], wallAmmo.pos[2] - g[1])).toBeLessThan(Math.hypot(wallAmmo.pos[0] - 2, wallAmmo.pos[2] + 12));
+  });
+  it('it pays the held gun\'s crate price (the LMG\'s 1000), not the pistol\'s 250', () => {
+    const { brain } = lmg({ points: 999 });
+    brain.update(1 / 60);
+    expect(brain.mode).not.toBe('resupply');
+  });
+});
+
+describe('a scripted errand to the ammo crate', () => {
+  it('presses at the crate though the game offers a view of it, and ends once the press is answered', () => {
+    const { G, brain, next, wallAmmo, player } = setup({ pos: [6, 0, -18.5], reserve: 90 });
+    G.game.focus = Object.create(wallAmmo); // interact.nearest() gives a live view, not the object itself
+    G.game.lastUse = null;
+    expect(brain.errandTo('ammo-store')).toBe(true);
+    for (let i = 0; i < 30 && !next.includes('interact'); i++) brain.update(1 / 60);
+    expect(next).toContain('interact');
+    expect(player.bot.goal).toEqual([player.pos[0], player.pos[2]]); // stands at it, not walking on
+    G.game.lastUse = { id: 'ammo-store', ok: true, reason: null };
+    brain.update(1 / 60);
+    expect(brain.errand).toBe(null);
+  });
+});

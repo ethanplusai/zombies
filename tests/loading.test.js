@@ -30,6 +30,8 @@ describe('loading screen tips', () => {
     expect(text).toContain(`diner is ${w.doors.d1}`);
     expect(text).toContain(`${w.boards.repairPoints} points a board, up to ${w.boards.repairCapPerRound} a round`);
     expect(text).toContain(`Pistol ammo is ${e.wallAmmo.cost}`);
+    expect(text).toContain(`Pistol ammo is ${e.crateAmmo.pistol}`);
+    expect(text).toMatch(/ammo crate .*fills whatever gun you're holding/);
     expect(text).toContain(`for ${e.powerups.ttl} seconds`);
     expect(text).toContain(`You can wear ${['zero', 'one', 'two', 'three', 'four'][tuning.touch.maxPlates]}`);
     expect(text).toMatch(/can't shoot while you're sprinting/);

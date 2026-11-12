@@ -4,10 +4,28 @@
 //
 // Def = { id, name, cls, auto, semiAuto, mag, reserve, maxReserve, damage, pellets, rpm, reload,
 //         reloadKind:'mag'|'shell'|'cylinder'|'belt'|'cell', shellStart, range,
-//         falloff:[start, end, minScale]|null, spread, recoil, pierce, moveScale, zoom,
+//         falloff:[start, end, minScale]|null, spread, recoil, pierce, penetration, moveScale, zoom,
 //         wall:{cost, ammo}|null, box, special, tracer, finish,
 //         upgraded:{name, damage, mag, reserve, maxReserve, tracer, finish} }
 // Spread values are cone half-angles in degrees; recoil is radians per shot (positive pitch looks up).
+
+// ---------------------------------------------------------------- penetration by class
+// A round passes through zombies standing in line: `bodies` more after the first, each one taking
+// `keep` x the damage the one before it took, and never more than `reach` m past the first body.
+// Walls and props stop it. A weapon may override any key (`penetration: {...}` in its entry);
+// `pierce` on a Def is its `bodies`. Design choices in the genre's manner.
+const penetration = {
+  pistol: { bodies: 1, keep: 0.5, reach: 3 },
+  revolver: { bodies: 2, keep: 0.7, reach: 6 },
+  shotgun: { bodies: 1, keep: 0.5, reach: 1.5 }, // per pellet
+  smg: { bodies: 1, keep: 0.55, reach: 3 },
+  rifle: { bodies: 3, keep: 0.75, reach: 8 },
+  lmg: { bodies: 4, keep: 0.8, reach: 10 },
+  special: { bodies: 0, keep: 0, reach: 0 }, // the Jumper arcs instead; the Roadflare is lobbed
+};
+// An upgraded weapon's round goes `bodies` further, keeps `keep` more (at most `keepMax`) and
+// reaches `reach` x as far.
+const penetrationUpgrade = { bodies: 1, keep: 0.1, keepMax: 0.95, reach: 1.5 };
 
 // ---------------------------------------------------------------- spread and recoil by class
 // The pistol's numbers are the original ones (they were SPREAD / RECOIL at the top of firing.js).
@@ -55,6 +73,8 @@ function def(id, name, cls, o, upName) {
     ...o,
   };
   delete d.spreadClass;
+  d.penetration = { ...(penetration[o.spreadClass || cls] || penetration.special), ...(o.penetration || null) };
+  d.pierce = d.penetration.bodies;
   d.semiAuto = !d.auto;
   d.upgraded = {
     name: `${name} "${upName}"`,
@@ -64,6 +84,11 @@ function def(id, name, cls, o, upName) {
     maxReserve: Math.round(d.maxReserve * upgrade.reserve),
     tracer: upgrade.tracer,
     finish: upgrade.finish,
+    penetration: d.penetration.bodies > 0 ? {
+      bodies: d.penetration.bodies + penetrationUpgrade.bodies,
+      keep: Math.min(penetrationUpgrade.keepMax, d.penetration.keep + penetrationUpgrade.keep),
+      reach: d.penetration.reach * penetrationUpgrade.reach,
+    } : d.penetration,
   };
   return d;
 }
@@ -75,7 +100,7 @@ const table = {
   }, 'Night Owl'),
   revolver: def('revolver', 'Marlow .44', 'revolver', {
     mag: 6, reserve: 36, maxReserve: 72, damage: 140, rpm: 150, reload: 2.4, reloadKind: 'cylinder', range: 70,
-    pierce: 1, box: 3,
+    box: 3,
   }, 'Last Call'),
   pump: def('pump', 'Hollis 12', 'shotgun', {
     // 85 rpm (a balance choice): at 70 it only matched the pistol's damage per second
@@ -95,7 +120,8 @@ const table = {
     wall: { cost: 1750, ammo: 700 }, box: 3,
   }, 'Long Night'),
   battleRifle: def('battleRifle', 'Ostrander 308', 'rifle', {
-    mag: 20, reserve: 80, maxReserve: 160, damage: 110, rpm: 320, reload: 2.5, range: 100, pierce: 1, box: 3,
+    mag: 20, reserve: 80, maxReserve: 160, damage: 110, rpm: 320, reload: 2.5, range: 100, box: 3,
+    penetration: { bodies: 5, keep: 0.85, reach: 12 }, // the heavy rifle: the deepest of all
     recoil: { pitchMin: 0.016, pitchMax: 0.024, yaw: 0.006, adsScale: 0.55, shake: 0.09, adsShake: 0.045 },
   }, 'Iron Vigil'),
   lmg: def('lmg', 'Dray 762', 'lmg', {
@@ -157,6 +183,8 @@ export const weapons = {
   ids: Object.keys(table),
   pistol: table.pistol, // original alias (tuning.pistol)
   classes,
+  penetration,
+  penetrationUpgrade,
   upgrade,
   melee,
   throwables,

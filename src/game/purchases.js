@@ -2,7 +2,7 @@
 //
 // use(it) -> {ok, reason}. Refusal reasons:
 //   none (no such interactable) | unavailable (no weapon yet, or nothing to sell) | full (ammo at
-//   max) | points (too few) | locked (a door that never opens) | owned (already bought, open, on or
+//   max: for the crate, the weapon in hand's) | points (too few) | locked (a door that never opens) | owned (already bought, open, on or
 //   upgraded) | power (needs the power on) | busy (the box is rolling or moving) | hold (a hold
 //   interactable: searching and boards are driven by the hold, not the press) | unknown (kind)
 // Every refusal except `hold` emits `buy:denied {item: kind, reason}`. Purchases emit
@@ -25,12 +25,57 @@ function slotOf(w, id) {
   return s[0] && s[0].id === id ? s[0] : s[1] && s[1].id === id ? s[1] : null;
 }
 
-// Price of ammo for weapon `id` as the player holds it (4500 once upgraded).
+// Stock price of ammo for weapon `id`: its own wall-ammo price, else its class's crate price
+// (tuning.economy.crateAmmo).
+function stockAmmo(id, fallback) {
+  const def = WEAPONS[id];
+  if (def && def.wall && def.wall.ammo) return def.wall.ammo;
+  const byClass = def && TE.crateAmmo && TE.crateAmmo[def.cls];
+  return byClass || fallback || TE.wallAmmo.cost;
+}
+
+// The price of ammo for weapon `id`, the same at the crate and at its wall: the stock price, or
+// upgraded crateUpgraded.scale x that, at most crateUpgraded.max. (What the info panel quotes.)
+export function crateAmmoPrice(id, upgraded, fallback) {
+  const stock = stockAmmo(id, fallback);
+  if (!upgraded) return stock;
+  const U = TE.crateUpgraded;
+  return Math.min(U.max, U.scale * stock);
+}
+
+// Price of ammo for weapon `id` as the player holds it (upgraded or not), at a wall or the crate.
 export function ammoCost(w, id, fallback) {
   const s = slotOf(w, id);
-  if (s && s.upgraded) return TE.upgradedAmmo;
-  const def = WEAPONS[id];
-  return (def && def.wall && def.wall.ammo) || fallback || TE.wallAmmo.cost;
+  return crateAmmoPrice(id, !!(s && s.upgraded), fallback);
+}
+
+// The weapon the ammo crate `it` refills: the one it names (a level may give one), else the one in
+// hand, else the pistol (an original stand-in weapon with no slots).
+export function crateWeaponOf(it, w) {
+  const named = wallWeaponOf(it);
+  if (named) return named;
+  return (w && typeof w.id === 'string' && isWeapon(w.id) && w.id) || 'pistol';
+}
+
+// What the crate shows for the weapon in hand: "<weapon name> ammo" (the upgraded name once
+// upgraded) and its price. Strings are made once per weapon and kept: the HUD reads this every frame.
+const crateLabels = new Map();
+function crateLabel(w, id) {
+  const s = slotOf(w, id);
+  const key = s && s.upgraded ? `${id}+` : id;
+  let l = crateLabels.get(key);
+  if (!l) { l = `${s ? statsFor(s).name : WEAPONS[id].name} ammo`; crateLabels.set(key, l); }
+  return l;
+}
+export function crateLabelOf(it, w) {
+  if (!w || !w.slots) return (it && it.label) || 'Ammo';
+  return crateLabel(w, crateWeaponOf(it, w));
+}
+export function crateCostOf(it, w) {
+  if (!w || !w.slots) return (it && it.cost) ?? TE.wallAmmo.cost;
+  const id = crateWeaponOf(it, w);
+  const s = slotOf(w, id);
+  return crateAmmoPrice(id, !!(s && s.upgraded));
 }
 
 /**
@@ -53,16 +98,17 @@ export function createPurchases({ economy, weapon, emit = () => {}, level = () =
     const max = s ? statsFor(s).maxReserve : tuning.pistol.maxReserve;
     const have = s ? s.reserve : w.ammo.reserve;
     if (have >= max) return refuse('full');
-    // the store's price is its own (the original 250); a wall buy's is the weapon table's
-    const cost = s && s.upgraded ? TE.upgradedAmmo : it.kind === 'wallAmmo' && it.cost != null ? it.cost : ammoCost(w, id);
+    // the crate's price is crateCostOf's, a wall's is ammoCost's; a stand-in's is the store's own
+    const cost = !s ? (it.cost != null ? it.cost : ammoCost(w, id)) : it.kind === 'wallAmmo' ? crateCostOf(it, w) : ammoCost(w, id);
     if (!economy.spend(cost, 'wallAmmo', it.id)) return refuse('points');
     if (s) w.addReserve(undefined, id); else w.addReserve(max - have);
     return ok;
   }
 
   const handlers = {
-    // the store's ammo: the pistol's (it.weapon names another weapon, if a level gives one)
-    wallAmmo: (it) => ammo(it, wallWeaponOf(it) || 'pistol'),
+    // the crate's ammo: for the weapon in hand (only that one), at that weapon's price; it.weapon
+    // names one weapon instead, if a level gives one
+    wallAmmo: (it) => ammo(it, crateWeaponOf(it, weapon())),
     wallWeapon(it) {
       const id = wallWeaponOf(it);
       const w = weapon();
@@ -104,6 +150,11 @@ export function createPurchases({ economy, weapon, emit = () => {}, level = () =
   };
 
   const p = {
+    // What using `it` would buy right now, for the prompt. Only the ammo crate's label and price
+    // depend on the weapon in hand (live: interact.js shows them); anything else is its own.
+    live: (it) => !!it && it.kind === 'wallAmmo' && !!(weapon() && weapon().slots),
+    labelOf: (it) => (it && it.kind === 'wallAmmo' ? crateLabelOf(it, weapon()) : it ? it.label : null),
+    costOf: (it) => (it && it.kind === 'wallAmmo' ? crateCostOf(it, weapon()) : it ? it.cost : null),
     use(it) {
       const h = it && handlers[it.kind];
       const r = !it ? refuse('none') : h ? h(it) : refuse('unknown');

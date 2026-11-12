@@ -10,6 +10,7 @@
 // (glass) and a cylinder impostor (casings). Blending is premultiplied alpha throughout: fire is an
 // emissive body with alpha (it covers what is behind it); only sparks are purely additive.
 import {
+  Vector4,
   InstancedBufferGeometry, BufferAttribute, InstancedInterleavedBuffer, InterleavedBufferAttribute, RawShaderMaterial, GLSL3,
   Mesh, Scene, NormalBlending, DoubleSide, Vector3,
 } from 'three';
@@ -22,6 +23,7 @@ import { createRingUploader } from './ring.js';
 import { casingLaunch } from './casing.js';
 import { createCombat } from './combat.js';
 import { MELEE } from '../weapon/rig.js';
+import { upgradeLook } from '../weapon/models/upgrade.js';
 
 export const MAX_PARTICLES = 4096;
 const CASING_SLOTS = 128; // casings live far longer than anything else: their own ring at the end of the pool
@@ -87,6 +89,7 @@ uniform mat4 viewMatrix;
 uniform mat4 projectionMatrix;
 uniform vec3 cameraPosition;
 uniform float uTime;
+uniform vec4 uFlashAt; // xyz: how far the muzzle has moved since the last shot's flash was born; w: that flash's birth time
 out vec2 vUv;
 out vec3 vWorld;
 out vec3 vT; out vec3 vB; out vec3 vN;
@@ -122,6 +125,7 @@ void main() {
   float drag = a4.y; float grav = a4.z * 9.81; float floorY = a4.w;
   float seed = a5.y;
   vec3 p = a0.xyz; vec3 v = a1.xyz;
+  if ((kind == 1 || kind == 10) && a0.w == uFlashAt.w) p += uFlashAt.xyz; // the flash stays on the muzzle as the gun recoils
   float sz = mix(a2.x, a2.y, 1.0 - (1.0 - u) * (1.0 - u));
   float spinT = age; float rest = 0.0; float restAge = 0.0; float alphaMul = 1.0;
   bool aligned = kind == 7 || kind == 8;
@@ -429,6 +433,7 @@ export function createFx(G) {
   // ---- particle buffers --------------------------------------------------------------------
   const data = new Float32Array(MAX_PARTICLES * STRIDE);
   const buffer = new InstancedInterleavedBuffer(data, STRIDE, 1);
+  const flashAt = { value: new Vector4(0, 0, 0, -1) };
   const geo = new InstancedBufferGeometry();
   geo.setIndex([0, 1, 2, 2, 1, 3]);
   geo.setAttribute('corner', new BufferAttribute(new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), 2));
@@ -436,7 +441,7 @@ export function createFx(G) {
   geo.instanceCount = MAX_PARTICLES;
   const material = new RawShaderMaterial({
     glslVersion: GLSL3, vertexShader: VERT, fragmentShader: frag(post),
-    uniforms: { ...post.shared, ...lights.uniforms, uAtlas: { value: atlases.particles.texture } },
+    uniforms: { ...post.shared, ...lights.uniforms, uAtlas: { value: atlases.particles.texture }, uFlashAt: flashAt },
     side: DoubleSide, depthTest: false, depthWrite: false, transparent: true, blending: NormalBlending, premultipliedAlpha: true,
   });
   const mesh = new Mesh(geo, material);
@@ -556,34 +561,64 @@ export function createFx(G) {
   }
 
   const MW = P.clone(); // where the world's flash light is put
-  function muzzle(pos, dir) {
+  // The flash's colours. Stock: what the particle shader's own fire ramp gives (multipliers of 1) and
+  // the warm lights. An upgraded weapon passes `tint` ([body rgb, core rgb], scene-linear): the
+  // multipliers are that colour over the ramp's own, so the flame comes out in the weapon's colour.
+  const FT = { core: [1, 1, 1], body: [1, 1, 1], stockFx: null, stockWorld: null, from: new Vector3(), on: false };
+  const _mz = new Vector3();
+  function flashTint(tint) {
+    const ml = lights.muzzle, wl = G.lights && G.lights.muzzle && G.lights.muzzle.color;
+    if (!FT.stockFx) FT.stockFx = ml.color.clone();
+    if (wl && !FT.stockWorld) FT.stockWorld = wl.clone();
+    if (!tint) {
+      FT.core[0] = FT.core[1] = FT.core[2] = 1; FT.body[0] = FT.body[1] = FT.body[2] = 1;
+      ml.color.copy(FT.stockFx); if (wl) wl.copy(FT.stockWorld);
+      return;
+    }
+    const b = tint[0], c = tint[1];
+    FT.body[0] = b[0]; FT.body[1] = b[1] / 0.5; FT.body[2] = b[2] / 0.16;
+    FT.core[0] = c[0]; FT.core[1] = c[1] / 0.8; FT.core[2] = c[2] / 0.55;
+    ml.color.set(b[0] * 1.2 + 0.13, b[1] * 1.2 + 0.08, b[2] * 1.2 + 0.04);
+    if (wl) wl.setRGB(b[0] * 0.9 + 0.1, b[1] * 0.9 + 0.06, b[2] * 0.9 + 0.03);
+  }
+  function muzzle(pos, dir, tint = null) {
     readVec(pos, P); readVec(dir, D);
     if (D.lengthSq() < 1e-8) D.set(0, 0, -1);
     D.normalize(); basis(D);
+    flashTint(tint);
+    const C = FT.core, B = FT.body;
     const ml = lights.muzzle;
     ml.pos.copy(P).addScaledVector(D, 0.12);
     ml.t0 = clock.now;
     // the same flash on the world, from the middle of the fireball rather than the crown: 12 cm from
     // the muzzle the light sat a hand's width from the glove and the frame and burned them out flat
     if (G.lights && G.lights.setMuzzleFlash) G.lights.setMuzzleFlash(MW.copy(P).addScaledVector(D, 0.5), 1);
+    // The flame is born a hair late, so its birth time is its own: the shader moves exactly these
+    // particles with the muzzle while they live (update(), below). Only for the gun in the hands.
+    const view = G.weapon && !G.weapon.stub && G.weapon.view;
+    FT.on = !!(view && typeof view.muzzleWorld === 'function') && view.muzzleWorld(_mz).distanceToSquared(P) < 0.01;
+    FT.from.copy(P);
+    delay = 0.0005;
+    flashAt.value.set(0, 0, 0, FT.on ? Math.fround(clock.now + delay + lead) : -1);
     // hot core and the star seen from behind the gun
-    spawn(KIND.fire, P.x + D.x * 0.03, P.y + D.y * 0.03, P.z + D.z * 0.03, D.x, D.y, D.z, 0.026, 0.09, 0.15, 0, 0, 1, 0.82, 0.6, 0.9, 12, 0, -1e5, 60, P_CELL.glow, 1);
-    spawn(KIND.fire, P.x + D.x * 0.05, P.y + D.y * 0.05, P.z + D.z * 0.05, D.x * 2, D.y * 2, D.z * 2, 0.05, 0.15, 0.26, rr(0, TAU), 0, 1, 0.9, 0.75, 1, 20, 0, -1e5, 42, P_CELL.star + rng.int(0, 3), 1);
+    spawn(KIND.fire, P.x + D.x * 0.03, P.y + D.y * 0.03, P.z + D.z * 0.03, D.x, D.y, D.z, 0.026, 0.09, 0.15, 0, 0, C[0], 0.82 * C[1], 0.6 * C[2], 0.9, 12, 0, -1e5, 60, P_CELL.glow, 1);
+    spawn(KIND.fire, P.x + D.x * 0.05, P.y + D.y * 0.05, P.z + D.z * 0.05, D.x * 2, D.y * 2, D.z * 2, 0.05, 0.15, 0.26, rr(0, TAU), 0, C[0], 0.9 * C[1], 0.75 * C[2], 1, 20, 0, -1e5, 42, P_CELL.star + rng.int(0, 3), 1);
     // flame tongues along the bore, plus two short side vents
     for (let i = 0; i < 2; i++) {
       cone(D, 0.1);
       const sp = rr(5.5, 8.5);
-      spawn(KIND.jet, P.x, P.y, P.z, W.x * sp, W.y * sp, W.z * sp, rr(0.045, 0.06), 0.075, 0.11, 0, 0, 1, 0.9, 0.75, 1, 26, 0, -1e5, 46, P_CELL.tongue + rng.int(0, 3), 0.034);
+      spawn(KIND.jet, P.x, P.y, P.z, W.x * sp, W.y * sp, W.z * sp, rr(0.045, 0.06), 0.075, 0.11, 0, 0, B[0], 0.9 * B[1], 0.75 * B[2], 1, 26, 0, -1e5, 46, P_CELL.tongue + rng.int(0, 3), 0.034);
     }
     for (let i = 0; i < 2; i++) {
       const s = i ? 1 : -1;
       W.copy(D).multiplyScalar(0.55).addScaledVector(T1, 0.55 * s).addScaledVector(T2, rr(-0.5, 0.5)).normalize();
-      spawn(KIND.jet, P.x, P.y, P.z, W.x * 3.5, W.y * 3.5, W.z * 3.5, 0.04, 0.04, 0.06, 0, 0, 1, 0.85, 0.7, 0.9, 30, 0, -1e5, 30, P_CELL.tongue + rng.int(0, 3), 0.03);
+      spawn(KIND.jet, P.x, P.y, P.z, W.x * 3.5, W.y * 3.5, W.z * 3.5, 0.04, 0.04, 0.06, 0, 0, B[0], 0.85 * B[1], 0.7 * B[2], 0.9, 30, 0, -1e5, 30, P_CELL.tongue + rng.int(0, 3), 0.03);
     }
+    delay = 0;
     for (let i = 0; i < 5; i++) {
       cone(D, 0.3);
       const sp = rr(6, 16);
-      spawn(KIND.spark, P.x, P.y, P.z, W.x * sp, W.y * sp, W.z * sp, rr(0.07, 0.2), 0.005, 0.003, 0, 0, 1, 0.9, 0.7, 1, 5, 0.6, -1e5, 26, P_CELL.streak, 0.012);
+      spawn(KIND.spark, P.x, P.y, P.z, W.x * sp, W.y * sp, W.z * sp, rr(0.07, 0.2), 0.005, 0.003, 0, 0, B[0], 0.9 * B[1], 0.7 * B[2], 1, 5, 0.6, -1e5, 26, P_CELL.streak, 0.012);
     }
     // powder smoke: thin grey haze from the muzzle outward along the bore, gone in a third of a second
     cloud(P, D, 64, 0.05, 0.4, 8.5, 13, -0.04, 0.3, 0.17, 0.03, 0.1, 0.22, 0.2, 0.2, 0.21, 0.055, 0.2, 0.7, -1e5, 0.8);
@@ -812,7 +847,7 @@ export function createFx(G) {
   if (G.events) {
     G.events.on('weapon:fire', (e) => {
       if (!e || !e.pos || !e.dir) return;
-      if (e.weapon !== 'jumper') muzzle(e.pos, e.dir); // the Jumper throws an arc (combat.js), not powder
+      if (e.weapon !== 'jumper') muzzle(e.pos, e.dir, e.upgraded ? upgradeLook(e.weapon).flash : null); // the Jumper throws an arc (combat.js), not powder
       ejectCasing(e);
     });
     const worldOpts = { surface: 'concrete' };
@@ -945,6 +980,8 @@ export function createFx(G) {
       const ma = clock.now - ml.t0;
       const level = ma >= 0 && ma < 0.2 ? Math.exp(-ma / 0.03) : 0;
       ml.intensity = 90 * level;
+      // the last shot's flame rides the muzzle for as long as it is seen
+      if (FT.on && ma >= 0 && ma < 0.08 && !clock.frozen) { const f = flashAt.value; G.weapon.view.muzzleWorld(_mz); f.x = _mz.x - FT.from.x; f.y = _mz.y - FT.from.y; f.z = _mz.z - FT.from.z; }
       // a staged flash is pinned in time: hold the world's flash light at the same age
       if (clock.frozen && level > 0 && G.lights && G.lights.setMuzzleFlash) G.lights.setMuzzleFlash(ml.pos, level);
       combat.update(clock.frozen ? 0 : dt); // after the staged-flash line above: a blast's flash is its own

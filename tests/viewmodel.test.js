@@ -251,6 +251,49 @@ describe('refresh', () => {
     expect(m.anchors.sight.y).toBeCloseTo(sight0, 9);
     expect(m.anchors.muzzle.z).toBeCloseTo(muzzle0, 9);
   });
+  it('every weapon takes the upgraded finish: its steel and its furniture are marked, and it comes off again', () => {
+    for (const id of Object.keys(W)) {
+      const m = view.entry(id).model;
+      view.refresh(id, { upgraded: true, attachments: new Set() });
+      expect(m.upgraded, id).toBe(true);
+      const kinds = new Set();
+      for (const mesh of m.meshes) { const u = mesh.material.vmUp; if (u && u.value > 0) kinds.add(u.value); }
+      expect(kinds.size, `${id}: materials the finish is drawn on`).toBeGreaterThanOrEqual(1);
+      expect(kinds.has(1) || kinds.has(3), `${id}: steel or a moulded body`).toBe(true);
+      view.refresh(id, { upgraded: false, attachments: new Set() });
+      expect(m.upgraded, id).toBe(false);
+    }
+  });
+  it('an upgrade bought with the weapon in the hands shows at once, as a transformation under a second long that moves nothing in one frame', () => {
+    for (const id of ['pistol', 'pump', 'lmg']) {
+      hold(id);
+      view.refresh(id, { upgraded: false, attachments: new Set() });
+      expect(view.upgraded).toBe(false);
+      expect(view.morph).toBe(null);
+      let frames;
+      frames = run(1.0, (f) => { if (f === 2) { view.refresh(id, { upgraded: true, attachments: new Set() }); expect(view.upgraded).toBe(true); expect(view.morph).toBe(0); } });
+      within(frames);
+      expect(view.morph, `${id}: over within a second`).toBe(null);
+      expect(view.upgraded).toBe(true);
+      expect(view.busy, `${id}: no animation holds the weapon`).toBe(false);
+      // the same weapon handed back stock: no transformation
+      view.refresh(id, { upgraded: false, attachments: new Set() });
+      expect(view.morph).toBe(null);
+    }
+  });
+  it('each upgraded weapon has its own colours, tracer and flame', async () => {
+    const { UPGRADE_LOOK, upgradeLook, TRACER_COLOR } = await import('../src/weapon/models/upgrade.js');
+    const seen = new Set();
+    for (const id of Object.keys(W)) {
+      const L = UPGRADE_LOOK[id];
+      expect(L, id).toBeTruthy();
+      expect(L.tracer.length).toBe(3); expect(L.flash.length).toBe(2);
+      seen.add(L.a.join());
+    }
+    expect(seen.size).toBe(Object.keys(W).length);
+    expect(upgradeLook('pump').tracer).toBe(UPGRADE_LOOK.pump.tracer);
+    expect(upgradeLook(undefined).tracer).toEqual(TRACER_COLOR.violet); // a round whose weapon is not known
+  });
   it('every built model answers attach for every kind without throwing', () => {
     for (const id of ['pistol', 'revolver', 'pump', 'smg']) {
       const m = view.entry(id).model;

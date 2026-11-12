@@ -6,7 +6,14 @@ export const economy = {
   points: { hit: 10, kill: 60, headshotKill: 100, meleeKill: 130, start: 500, bruteKill: 500 },
   // Original alias (tuning.wallAmmo): the store's wall ammo is the pistol's, at the pistol's price.
   wallAmmo: { cost: 250 },
-  upgradedAmmo: 4500, // ammo for an upgraded weapon, at any wall: fills it
+  upgradedAmmo: 4500, // no longer a price: upgraded ammo is crateUpgraded's rule everywhere (kept while the info panel still reads it)
+  // The forecourt ammo crate refills the reserve of the weapon in hand (only that one: swap to buy for
+  // the other); a wall buy refills its own gun. Both charge the same. The stock price: the weapon's own wall-ammo price (tuning.weapons.table[id].wall.ammo)
+  // when it has one, else its class's below. Upgraded: `crateUpgraded.scale` x the stock price, at
+  // most `crateUpgraded.max` (pistol 750, pump 1200, SMG and revolver 1500, rifle 2100, heavy rifle
+  // 2250, auto shotgun 2400, LMG and specials 3000). Design choices.
+  crateAmmo: { pistol: 250, revolver: 500, shotgun: 500, smg: 500, rifle: 750, lmg: 1000, special: 1500 },
+  crateUpgraded: { scale: 3, max: 3000 },
   // worldLayout's wall-buy names -> the weapon table's ids
   wallBuys: { hollis12: 'pump', pike45: 'smg', calder556: 'rifle', brandt12: 'autoShotgun' },
   // Weapon box: weighted by tuning.weapons.table[id].box, excluding weapons held. Works without power.

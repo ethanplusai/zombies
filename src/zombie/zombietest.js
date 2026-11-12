@@ -23,6 +23,8 @@
 //   zbuild=<gaunt|average|heavy|bloated|brute>   zvars=1 the six variants side by side (trucker, waitress, mechanic, guest, trooper, drifter)
 //   zwound=<part>[,kind]  shoot that part from the camera (bullet | blast | bite)   zsever=<part>[,part]   zhead=<0..2> damaged head
 //   zdbg=<1..4>    show a baked map (slopes, occlusion, colour, thinness)
+// window.__ztest.ctl.speed (m/s, null = zspeed) is read every frame, so a script driving the page can
+// start, stop and change the pace of a walk; it turns the zombies through their meshes' rotation.y.
 //   zvictim=<m>    a victim stands this far in front of each zombie (the look / attack target is its
 //                  chest, feet + 1.3 m, as the manager gives it); zeye=1 puts the camera at its eyes (1.7 m)
 import { Group, Mesh, PlaneGeometry, BoxGeometry, MeshBasicMaterial, Color, CapsuleGeometry, Matrix4, Vector3 } from 'three';
@@ -137,6 +139,7 @@ export function installZombieTest(G) {
     });
   };
 
+  const ctl = { speed: null };
   const step = (dt) => {
     for (let i = 0; i < count; i++) {
       const a = anims[i], m = zombies[i].mesh;
@@ -144,7 +147,7 @@ export function installZombieTest(G) {
         // what the manager should do: animation and mesh LOD from the distance to the camera
         const cd = Math.hypot(m.position.x - G.camera.position.x, m.position.z - G.camera.position.z);
         if (autoLod) zombies[i].setLod(cd > 18 ? 1 : 0);
-        a.update(dt, pose === 'walk' ? speed + (i % 3) * 0.12 : 0, autoLod ? cd : 0);
+        a.update(dt, ctl.speed !== null ? ctl.speed : pose === 'walk' ? speed + (i % 3) * 0.12 : 0, autoLod ? cd : 0);
         m.position.x += Math.sin(m.rotation.y) * a.rootSpeed * dt;
         m.position.z += Math.cos(m.rotation.y) * a.rootSpeed * dt;
       }
@@ -212,7 +215,7 @@ export function installZombieTest(G) {
     G.shotCam.cam[0] = cam0[0] + m.x - p0[0]; G.shotCam.cam[2] = cam0[2] + m.z - p0[1];
   };
   track();
-  window.__ztest = { zombies, anims, buildMs, step, root };
+  window.__ztest = { zombies, anims, buildMs, step, root, ctl };
   return {
     stub: false, alive: count, list: zombies, zombies, anims,
     update(dt) {

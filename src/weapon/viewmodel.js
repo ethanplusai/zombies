@@ -30,6 +30,7 @@ import { key, Spring, smoother, clamp01, lerp, ease } from './anim.js';
 import * as RIG from './rig.js';
 import { lastLaunch } from '../fx/casing.js';
 import { installWeaponTest } from './weapontest.js';
+import { upgradeLook } from './models/upgrade.js';
 
 const DEG = Math.PI / 180;
 const VM_NEAR = 0.012, VM_FAR = 6;
@@ -45,6 +46,12 @@ const FLASH_WAIT = 0.12; // seconds a shot waits for the gun to come round befor
 const CASE_LIFE = 0.32; // seconds the viewmodel draws a spent case before the world particle carries on
 const FLASH_AT = [-0.035, 0.075, -0.06]; // view-space offset from the muzzle to the flash term's light: up and toward the eye's side, so the faces the eye sees take it
 const FLASH_RGB = [2.3, 1.36, 0.58];
+const FLAME_RGB = [[1.0, 0.36, 0.08], [1.0, 0.86, 0.6]]; // the stock flame: its body and its core
+// An upgrade bought with the weapon in the hands: a lit front runs from the hands to the muzzle
+// (SWEEP seconds, between NEAR and FAR metres ahead of the eye) and the upgraded finish is drawn
+// behind it; the lines it leaves burn bright and settle over the rest of MORPH seconds.
+const ZING_LOW = { gain: 2.2, pitch: 0.7 }, ZING_HIGH = { gain: 2.6, pitch: 1.3 };
+const MORPH = 0.8, MORPH_SWEEP = 0.42, MORPH_NEAR = 0.08, MORPH_FAR = 1.35;
 const M = RIG.MARKS;
 const WEAPONS = tuning.weapons.table;
 
@@ -64,6 +71,10 @@ export function createWeaponView(G) {
   const vm = {
     uVmProj: { value: new Matrix4() }, uVmOn: { value: 1 }, uVmDepth: { value: new Vector2(DEPTH_SLICE, DEPTH_SLICE - 1) },
     uVmFlash: { value: new Vector4(0, 0, 0, 0) }, uVmFlashPos: { value: new Vector3() }, uVmFlashFall: { value: 34 }, uVmMuzzleL: { value: new Vector3(0, 1e6, 0) },
+    // the upgraded finish of the weapon in the hands: x 1 when it is upgraded, y seconds (the pulses), z how far
+    // from the eye the finish reaches (metres; far away once it is whole), w the lit front's strength
+    uVmUp: { value: new Vector4(0, 0, 1e3, 0) }, uVmUpA: { value: new Vector3(0.62, 0.34, 1) }, uVmUpB: { value: new Vector3(0.3, 0.8, 1) },
+    uVmUpP: { value: 0.0125 }, // metres between the finish's lit lines (closer on a handgun, which has less to draw them on)
   };
   const occ = { uVmOccA: { value: new Float32Array(OCCLUDERS * 4) }, uVmOccB: { value: new Float32Array(OCCLUDERS * 4) }, uVmOccN: { value: 0 } };
   const noContact = { value: 0 };
@@ -83,6 +94,7 @@ export function createWeaponView(G) {
     const rough = o.rough || [1, 0];
     const u = {
       ...vm, uVmFx: { value: new Vector4(o.relief ?? 1, o.albedo ?? 1, rough[0], rough[1]) }, uVmFuzz: { value: new Vector2(o.fuzz ?? 1, o.spec ?? 1) },
+      uVmUpK: { value: 0 }, // what this material is to the upgraded finish: 0 untouched, 1 steel, 2 furniture, 3 a moulded body (models/upgrade.js sets it)
       uVmContact: o.contact || noContact, uVmWeave: { value: new Vector2(o.weave ? o.weave[0] : 0, o.weave ? o.weave[1] : 0) }, uVmWeaveOn: weaveOn, uVmSeam: { value: o.seam || 0 }, ...(o.occ ? occ : null),
     };
     mat.onBeforeCompile = (shader, renderer) => {
@@ -116,6 +128,11 @@ uniform float uVmSeam;
 uniform vec4 uVmFlash;
 uniform vec3 uVmFlashPos;
 uniform float uVmFlashFall;
+uniform vec4 uVmUp;
+uniform vec3 uVmUpA;
+uniform vec3 uVmUpB;
+uniform float uVmUpP;
+uniform float uVmUpK;
 ${occGlsl}
 void vmSurface(inout Surf s) {
   s.grad *= uVmFx.x; s.dH *= uVmFx.x; gGradX *= uVmFx.x; gHt *= uVmFx.x;
@@ -138,6 +155,44 @@ void vmSurface(inout Surf s) {
   s.ao *= 1.0 - 0.85 * c;
   s.albedo *= 1.0 - 0.62 * c;
   s.rough = mix(s.rough, 1.0, 0.5 * c);
+  // the upgraded finish, behind the lit front (everything, once the front has passed the muzzle)
+  if (uVmUpK > 0.5 && uVmUp.x > 0.0) {
+    float depth = vViewPosition.z;
+    float k = uVmUp.x * smoothstep(-0.008, 0.008, uVmUp.z - depth);
+    vec3 tint = mix(uVmUpA, uVmUpB, smoothstep(0.1, -0.45, vSP.z)); // one colour at the butt, the other at the muzzle
+    bool steel = uVmUpK < 1.5;
+    // lines the length of the gun, a little wavy; faded where a face lies along the lines' own
+    // planes (they would smear into a band there)
+    float c = (vSP.y * 0.8 + vSP.x * 0.6) / uVmUpP + 0.2 * sin(vSP.z * 48.0);
+    float cw = fwidth(c);
+    float sd = fract(c) - 0.5;
+    float face = smoothstep(0.2, 0.55, cw * uVmUpP / max(gFp, 1e-6));
+    float line = (1.0 - smoothstep(0.05, 0.05 + max(cw, 0.03), abs(sd))) * face;
+    // each line lies in a cut channel: its walls tip the surface and sit in their own shade
+    float wall = (smoothstep(0.05, 0.11, abs(sd)) - smoothstep(0.11, 0.2, abs(sd))) * face * (1.0 - smoothstep(0.15, 0.4, cw));
+    s.grad += vec3(0.6, 0.8, 0.0) * (sign(sd) * wall * 0.9 * k);
+    s.ao *= 1.0 - 0.5 * wall * k;
+    if (steel) {
+      // a dark mirror: the colour lies in broad bands of it that drift along the gun
+      float band = smoothstep(0.3, 0.9, sin(c * 1.5708 + 2.0 * sin(vSP.z * 15.0 - uVmUp.y * 0.7) + vSP.z * 8.0));
+      s.albedo = mix(s.albedo, mix(vec3(0.03) + tint * 0.05, tint * 0.5, band), k);
+      s.metal = mix(s.metal, 1.0, k);
+      s.rough = mix(s.rough, mix(0.34, 0.2, band), k);
+    } else if (uVmUpK > 2.5) { // dark paint in the weapon's colour, the same drifting bands in it
+      float band = smoothstep(0.3, 0.9, sin(c * 1.5708 + 2.0 * sin(vSP.z * 15.0 - uVmUp.y * 0.7) + vSP.z * 8.0));
+      s.albedo = mix(s.albedo, mix(tint * 0.035, tint * 0.22, band), k);
+      s.metal = mix(s.metal, 0.0, k);
+      s.rough = mix(s.rough, max(s.rough, 0.55), k);
+    } else { // matt black, a breath of the colour in it
+      s.albedo = mix(s.albedo, s.albedo * 0.05 + tint * 0.006, k);
+      s.rough = mix(s.rough, max(s.rough * 0.8, 0.45), k);
+    }
+    // the lines are lit, each carrying pulses toward the muzzle
+    float pulse = pow(0.5 + 0.5 * sin(vSP.z * 26.0 + uVmUp.y * 5.0 + floor(c) * 2.4), 8.0);
+    vec3 glow = line * (uVmUpA * 0.11 + mix(uVmUpA, uVmUpB, 0.7) * pulse * 0.9) * (uVmUpK > 1.5 && uVmUpK < 2.5 ? 0.6 : 1.0);
+    glow += tint * pow(1.0 - clamp(gNdv, 0.0, 1.0), 4.0) * 0.012; // and a faint rim of the same colour
+    s.emissive += k * glow * (1.0 + 3.0 * uVmUp.w) + exp(-abs(depth - uVmUp.z) * 38.0) * uVmUp.w * (tint * 1.3 + 0.2) * 1.8;
+  }
 }
 void main() {`, 'fragment main');
       f = sub(f, 'vec3 totalSpecular = reflectedLight.directSpecular + reflectedLight.indirectSpecular;', 'vec3 totalSpecular = (reflectedLight.directSpecular + reflectedLight.indirectSpecular) * uVmFuzz.y;', 'totalSpecular');
@@ -171,6 +226,7 @@ void main() {`, 'fragment main');
       shader.fragmentShader = f;
     };
     mat.customProgramCacheKey = () => `${keyOf}:vm${o.occ ? 'o' : ''}`;
+    mat.vmUp = u.uVmUpK; // (on the material itself: the surface materials share one userData)
     return mat;
   };
 
@@ -204,13 +260,13 @@ void main() {`, 'fragment main');
     quad([-0.6, -0.6, -0.12], [0.6, -0.6, -0.12], [0.6, 0.6, -0.12], [-0.6, 0.6, -0.12], 1);
     const geo = new BufferGeometry();
     geo.setAttribute('position', new Float32BufferAttribute(pos, 3)); geo.setAttribute('uv', new Float32BufferAttribute(uv, 2)); geo.setAttribute('aKind', new Float32BufferAttribute(kind, 1));
-    const u = { uVmProj: vm.uVmProj, uVmDepth: vm.uVmDepth, uVmOn: vm.uVmOn, uF: { value: new Vector4(0, 0, 0, 0) } }; // strength, seed, age 0..1
+    const u = { uVmProj: vm.uVmProj, uVmDepth: vm.uVmDepth, uVmOn: vm.uVmOn, uF: { value: new Vector4(0, 0, 0, 0) }, uC0: { value: new Vector3(...FLAME_RGB[0]) }, uC1: { value: new Vector3(...FLAME_RGB[1]) } }; // uF: strength, seed, age 0..1; uC0, uC1: the flame's body and core colours
     const mat = new ShaderMaterial({
       uniforms: u, transparent: true, depthWrite: false, blending: AdditiveBlending, side: DoubleSide, toneMapped: false,
       vertexShader: /* glsl */ `uniform mat4 uVmProj; uniform vec2 uVmDepth; uniform float uVmOn; attribute float aKind; varying vec2 vU; varying float vK;
 void main() { vU = uv; vK = aKind; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
   if (uVmOn > 0.5) { gl_Position = uVmProj * mv; gl_Position.z = (gl_Position.z / gl_Position.w * uVmDepth.x + uVmDepth.y) * gl_Position.w; } }`,
-      fragmentShader: /* glsl */ `uniform vec4 uF; varying vec2 vU; varying float vK;
+      fragmentShader: /* glsl */ `uniform vec4 uF; uniform vec3 uC0; uniform vec3 uC1; varying vec2 vU; varying float vK;
 float h(float n) { return fract(sin(n * 127.1 + uF.y * 311.7) * 43758.5453); }
 float n1(float x) { float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(h(i), h(i + 1.0), f); }
 void main() {
@@ -228,13 +284,13 @@ void main() {
     I = (exp(-r * 6.5) * 1.6 + spikes * exp(-r * 3.2)) * (1.0 - smoothstep(0.7, 1.0, r));
   }
   I *= uF.x;
-  vec3 c = mix(vec3(1.0, 0.36, 0.08), vec3(1.0, 0.86, 0.6), clamp(I * 1.4, 0.0, 1.0)) * I * 9.0;
+  vec3 c = mix(uC0, uC1, clamp(I * 1.4, 0.0, 1.0)) * I * 9.0;
   gl_FragColor = vec4(c, 1.0);
 }`,
     });
     const mesh = new Mesh(geo, mat);
     mesh.frustumCulled = false; mesh.visible = false; mesh.renderOrder = 5; mesh.name = 'flame';
-    return { mesh, u: u.uF.value };
+    return { mesh, u: u.uF.value, c0: u.uC0.value, c1: u.uC1.value };
   })();
   gun.add(flame.mesh);
   const adopt = (model) => {
@@ -294,7 +350,8 @@ void main() {
   }
   // The finish and the attachments of a weapon's model. o: { upgraded, attachments: Set-like }.
   function applyLook(e, o) {
-    e.model.finish(!!(o && o.upgraded));
+    e.upgraded = !!(o && o.upgraded);
+    e.model.finish(e.upgraded);
     const at = o && o.attachments;
     const kinds = tuning.weapons.attachments.kinds;
     for (let i = 0; i < kinds.length; i++) e.model.attach(kinds[i], !!(at && typeof at.has === 'function' && at.has(kinds[i])));
@@ -302,11 +359,37 @@ void main() {
   }
   // A weapon was upgraded or took an attachment (or a new game handed the same weapon back stock):
   // its model follows at once, in the hands or not. No animation.
+  // An upgrade bought with the weapon in the hands is shown at once, as a transformation (startMorph).
   function refresh(id, o) {
     const e = entry(id);
+    const was = !!e.upgraded;
     applyLook(e, o);
-    if (e === cur && S.frozen) update(0);
+    if (e === cur) {
+      syncLook();
+      if (e.upgraded && !was && !S.frozen && S.visible && !S.product) startMorph();
+      if (!e.upgraded) S.morph.on = false;
+      if (S.frozen) update(0);
+    }
     return true;
+  }
+  // The colours that follow the weapon in the hands: its flame, the light its flash throws on the
+  // viewmodel and the upgraded finish's two colours.
+  function syncLook() {
+    const up = !!cur.upgraded, L = upgradeLook(cur.id);
+    const f0 = up ? L.flash[0] : FLAME_RGB[0], f1 = up ? L.flash[1] : FLAME_RGB[1];
+    flame.c0.set(f0[0], f0[1], f0[2]); flame.c1.set(f1[0], f1[1], f1[2]);
+    for (let i = 0; i < 3; i++) S.flashRGB[i] = up ? 1.2 + 1.0 * L.flash[0][i] : FLASH_RGB[i];
+    vm.uVmUpA.value.set(L.a[0], L.a[1], L.a[2]); vm.uVmUpB.value.set(L.b[0], L.b[1], L.b[2]);
+    vm.uVmUpP.value = cur.model.cls === 'pistol' || cur.model.cls === 'revolver' ? 0.0075 : 0.0125;
+  }
+  const morphEvt = { weapon: '' };
+  function startMorph() {
+    S.morph.on = true; S.morph.t = 0;
+    rec.up.kick(0.3); rec.p.kick(1.6); rec.r.kick(2.4); // the gun jumps in the hands
+    morphEvt.weapon = cur.id;
+    if (G.events && typeof G.events.emit === 'function') G.events.emit('weapon:transform', morphEvt);
+    // its sound: the ring an upgraded shot carries, low as the front starts and high as it leaves the muzzle
+    if (G.audio && typeof G.audio.play === 'function') { G.audio.play('upgrade_zing', ZING_LOW, 0); G.audio.play('upgrade_zing', ZING_HIGH, MORPH_SWEEP); }
   }
   // what the off hand holds for a swing or a throw (placed with the hand in compose)
   const props = buildHandProps(G, patch);
@@ -356,6 +439,7 @@ void main() {
     locked: false, lockT: 1, relT: 1, slide: 0,
     hammer: 1, trigger: 0, cyl: 0,
     rounds: 1,
+    flashRGB: [FLASH_RGB[0], FLASH_RGB[1], FLASH_RGB[2]], morph: { on: false, t: 0 },
     flashT: 1, flashK: 1, flashHold: false, holdT: 0, boreDot: 1, dt: 0, launchSeen: lastLaunch[6],
     bob: { x: 0, y: 0, roll: 0, pitch: 0 },
     sway: { yaw: 0, pitch: 0, x: 0, y: 0 },
@@ -995,8 +1079,22 @@ void main() {
 
     // ---- the weapon's own muzzle flash, and the world's flash light to ignore ----
     const fl = S.flashT < RIG.FLASH_TIME && !S.flashHold ? S.flashK * (1 - (S.flashT / RIG.FLASH_TIME) ** 2) : 0;
-    vm.uVmFlash.value.set(FLASH_RGB[0], FLASH_RGB[1], FLASH_RGB[2], S.product ? 0 : fl);
+    vm.uVmFlash.value.set(S.flashRGB[0], S.flashRGB[1], S.flashRGB[2], S.product ? 0 : fl);
     vm.uVmFlashFall.value = cur.flash.fall;
+    // the upgraded finish, and the front that draws it on
+    const mo = S.morph, up = vm.uVmUp.value;
+    up.x = cur.upgraded ? 1 : 0; up.y = S.time % 1000; up.z = 1e3; up.w = 0;
+    if (mo.on && cur.upgraded) {
+      const u = clamp01(mo.t / MORPH_SWEEP);
+      up.z = u < 1 ? lerp(MORPH_NEAR, MORPH_FAR, u * u * (3 - 2 * u)) : 1e3;
+      up.w = u < 1 ? 1 : 1 - smoother((mo.t - MORPH_SWEEP) / (MORPH - MORPH_SWEEP));
+      if (fl <= 0 && !S.product) { // the front lights the hands and the gun as it passes, in the weapon's colour
+        const A = vm.uVmUpA.value, B = vm.uVmUpB.value;
+        vm.uVmFlash.value.set(0.4 + A.x + B.x, 0.4 + A.y + B.y, 0.4 + A.z + B.z, 0.3 * up.w);
+        vm.uVmFlashFall.value = 16;
+        vm.uVmFlashPos.value.lerpVectors(model.anchors.grip, model.anchors.muzzle, u).applyMatrix4(gunM).add(_v.set(FLASH_AT[0], FLASH_AT[1], FLASH_AT[2]));
+      }
+    }
     flame.mesh.visible = fl > 0 && S.visible;
     flame.u.x = fl > 0 ? 1 - S.flashT / RIG.FLASH_TIME : 0; flame.u.z = S.flashT / RIG.FLASH_TIME;
     if (fl > 0) vm.uVmFlashPos.value.copy(model.anchors.muzzle).applyMatrix4(gunM).add(_v.set(FLASH_AT[0], FLASH_AT[1], FLASH_AT[2]));
@@ -1016,6 +1114,7 @@ void main() {
       S.time += dt;
       if (S.flashHold) { S.holdT += dt; if (S.holdT > FLASH_WAIT) { S.flashHold = false; S.flashT = 1; } } else S.flashT += dt;
       cur.trT += dt;
+      if (S.morph.on) { S.morph.t += dt; if (S.morph.t >= MORPH) S.morph.on = false; }
       if (BL.on && !BL.pending) { BL.t += dt; if (BL.t >= BL.dur) { BL.on = false; BL.pos.fill(0); BL.rot.fill(0); BL.magD = 0; } }
       stepAnim(dt);
       stepAction(dt);
@@ -1082,7 +1181,9 @@ void main() {
       if (anim.on && anim.name !== 'swap') anim.on = false; // a clip belongs to the weapon it was started on
       cur = e;
       cur.model.root.visible = true;
+      S.morph.on = false;
     }
+    syncLook();
     S.shot.on = false; S.pump.on = false; S.pump.v = 0; S.locked = false; S.lockT = 1; S.relT = 1; S.slide = 0; S.hammer = 1; S.cyl = 0;
   }
   // Put the held weapon away and bring `id` up. Returns the seconds until it can fire.
@@ -1099,12 +1200,13 @@ void main() {
   }
 
   // Put the viewmodel in a named state at a time, deterministically (test stage, screenshots).
-  // pose: hip | ads | sprint | walk | empty | fire | reload | emptyreload | inspect | draw | swing | throw | pump | swap
+  // pose: hip | ads | sprint | walk | empty | fire | reload | emptyreload | inspect | draw | swing | throw | pump | swap | transform
+  // (transform: an upgrade bought with the weapon in the hands, t seconds in; it leaves the weapon upgraded)
   // (swap: o.to = the weapon to switch to; o.ads: while aiming). For a shell weapon `reload` loads three.
   function stage(pose, t = 0, o = {}) {
     rand = G.rng.fork('weapon.view');
     S.frozen = false; anim.on = false; BL.on = false; BL.pos.fill(0); BL.rot.fill(0); BL.magD = 0; last.valid = false; cur.tv.fill(0); S.shot.on = false; S.pump.on = false; S.pump.v = 0; S.locked = false; S.lockT = 1; S.relT = 1; S.hammer = 1; S.cyl = 0;
-    S.flashHold = false; S.boreDot = 1; S.slide = 0; S.trigger = 0; S.adsTarget = 0; S.adsLin = 0; S.sprint = 0; S.fakeDist = null; S.fakeSprint = false; S.time = 0; S.rounds = 1; S.flashT = 1;
+    S.morph.on = false; S.flashHold = false; S.boreDot = 1; S.slide = 0; S.trigger = 0; S.adsTarget = 0; S.adsLin = 0; S.sprint = 0; S.fakeDist = null; S.fakeSprint = false; S.time = 0; S.rounds = 1; S.flashT = 1;
     clearCases();
     for (const s of springs) s.reset();
     S.bob.x = S.bob.y = S.bob.roll = S.bob.pitch = 0;
@@ -1117,6 +1219,7 @@ void main() {
     else if (pose === 'fire') { play('fire', { casing: true }); if (t > 0) run(t); }
     else if (pose === 'reload') { play('reload', { shells: 3 }); if (t > 0) run(t / anim.k); }
     else if (pose === 'pump') { play('pump', { eject: true }); if (t > 0) run(t); }
+    else if (pose === 'transform') { cur.upgraded = true; cur.model.finish(true); syncLook(); startMorph(); if (t > 0) run(t); }
     else if (pose === 'swap') { setWeapon(o.to || STAND_IN); if (t > 0) run(t); }
     else if (TL[pose]) { play(pose); if (t > 0) run(t / anim.k); }
     S.frozen = true;
@@ -1149,6 +1252,8 @@ void main() {
     get busy() { return anim.on; },
     get weapon() { return cur.id; },
     get model() { return cur.model; },
+    get upgraded() { return !!cur.upgraded; }, // the weapon in the hands wears the upgraded finish
+    get morph() { return S.morph.on ? S.morph.t / MORPH : null; }, // 0..1 through the transformation, or null
     durations, durationOf,
     depthSlice: DEPTH_SLICE, // viewmodel pixels have raw depth below this
     // internals for the test stage

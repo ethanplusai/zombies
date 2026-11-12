@@ -141,7 +141,7 @@ export function buildJumper(G, patch = (m) => m) {
     // the nose is tipped up so the gap between the clamps is on the axis: the picture is the coil running
     // away to the two clamps, the leads either side, a strip of the pack along the bottom edge.
     adsHide: [parts.bar],
-    pose: { ads: 0.08, adsRot: [0.1765, 0, 0], hip: { pos: [0.115, -0.15, -0.21], rot: [0.04, 0.2, 0.05] }, kick: [1.6, 2.4, 0.2, 0.8, 1.2] },
+    pose: { ads: 0.08, adsRot: [0.1765, 0, 0], hip: { pos: [0.18, -0.185, -0.23], rot: [0.04, 0.09, 0.08] }, kick: [1.6, 2.4, 0.2, 0.8, 1.2] },
     anchors: {
       muzzle: new Vector3(0, 0.012, TIP * MM),
       eject: new Vector3(0.03, 0.01, -0.12),

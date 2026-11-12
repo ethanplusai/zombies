@@ -784,7 +784,7 @@ describe('fire control by weapon', () => {
     expect(near[0]).toBe(28);
   });
 
-  it('a pierce 1 round damages two zombies in line and not a third', () => {
+  it('a revolver round goes through three zombies in line, keeping 0.7 of its damage each time', () => {
     const m = mockG();
     const line = [5, 6, 7]; // three zombies straight ahead
     m.G.zombies.raycast = (o, d, max) => {
@@ -798,19 +798,22 @@ describe('fire control by weapon', () => {
     m.G.params.give = ['revolver'];
     const w = createWeapon(m.G, { createView: () => null });
     w.fire();
-    expect(m.damaged.map((d) => d.id)).toEqual([1, 2]);
-    expect(m.damaged[1].amount).toBe(140);
+    expect(m.damaged.map((d) => d.id)).toEqual([1, 2, 3]);
+    expect(m.damaged[0].amount).toBe(140);
+    expect(m.damaged[1].amount).toBeCloseTo(98);
+    expect(m.damaged[2].amount).toBeCloseTo(68.6);
     const hits = m.log.filter((l) => l[0] === 'hit:zombie').map((l) => l[1]);
-    expect(hits.map((h) => h.id)).toEqual([1, 2]);
+    expect(hits.map((h) => h.id)).toEqual([1, 2, 3]);
     expect(hits[0].dir).toBeTruthy();
-    // the pistol does not pierce
+    // the pistol goes through one more at half damage
     m.damaged.length = 0;
     w.give('pistol', { slot: 0 });
     for (let i = 0; i < 60; i++) w.update(DT);
     w.switchTo(0);
     for (let i = 0; i < 60; i++) w.update(DT);
     w.fire();
-    expect(m.damaged.map((d) => d.id)).toEqual([1]);
+    expect(m.damaged.map((d) => d.id)).toEqual([1, 2]);
+    expect(m.damaged[1].amount).toBe(20);
   });
 
   it('a world hit stops a piercing round', () => {

@@ -69,6 +69,14 @@ export const CONTROLS = [
   { id: 'hint', name: 'Hide a hint', key: 'H', touch: 'Tap its ✕' },
 ];
 
+// The name for a tight space: an upgraded gun's quoted nickname alone ('Ostrander 308 "Iron Vigil"' -> 'Iron Vigil').
+export function shortWeaponName(name) {
+  const m = /"([^"]+)"/.exec(String(name || ''));
+  return m ? m[1] : String(name || '');
+}
+// True where the readouts should use short names: a touch layout, or a window narrower than 720 px.
+export const narrowScreen = (touch) => !!touch || (typeof window !== 'undefined' && window.innerWidth < 720);
+
 // Ammo as shown: numbers, or null for "—" when the weapon module has nothing yet.
 export function ammoView(weapon) {
   const a = weapon && weapon.ammo;

@@ -8,7 +8,7 @@ import { createTitleCam } from './titlecam.js';
 import { createTouchHud, layoutTouch, clearToggles, watchInsets } from './touchHud.js';
 import { createOrient } from './orient.js';
 import { loadFonts } from './wordmark.js';
-import { formatPoints, denyText, promptParts, ammoView, remaining, clamp, keyLabel, interactVerb } from './format.js';
+import { formatPoints, denyText, promptParts, ammoView, remaining, clamp, keyLabel, interactVerb, shortWeaponName, narrowScreen } from './format.js';
 
 const STAGES = ['title', 'hud', 'paused', 'dead', 'settings', 'controls'];
 const CORNERS = ['tl', 'tr', 'tc', 'bl', 'br', 'bc'];
@@ -236,7 +236,7 @@ export function createUi(G) {
 
     // ---- ammo
     const av = S ? { mag: S.mag, reserve: S.reserve, name: 'Pistol' } : ammoView(G.weapon);
-    setText('wname', aName, av.name);
+    setText('wname', aName, narrowScreen(ui.touch) ? shortWeaponName(av.name) : av.name);
     setText('mag', mag, av.mag === null ? '—' : String(av.mag));
     setText('res', reserve, av.reserve === null ? '—' : String(av.reserve));
     const lowMag = av.mag !== null && av.mag <= Math.ceil(magSize * 0.25);

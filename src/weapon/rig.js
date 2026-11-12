@@ -128,8 +128,12 @@ export const flashFor = (cls) => FLASH[cls] || FLASH.pistol;
 // shotgun's eye sits above the receiver and the muzzle comes up to put the bead on the axis). elbow / elbowAds: view-space
 // points the forearms run toward. kick: recoil impulse scales [back, pitch, up, yaw, roll].
 // fov: the viewmodel's own vertical field of view at hip and when aiming.
+// The hip hold differs by class, and in every one the bore runs toward the crosshair (a few degrees
+// inward of it, never across the view): a pistol out in front of the chest; an SMG compact and high;
+// a rifle at low ready off the shoulder; a shotgun low at the hip, canted; an LMG slung lowest, heavy
+// and rolled over; the specials low like a shotgun (the Jumper) or out like a pistol (the flare gun).
 const PISTOL_POSE = {
-  hip: { pos: [0.14, -0.062, -0.335], rot: [0.1, 0.45, 0.15] },
+  hip: { pos: [0.15, -0.075, -0.35], rot: [0.06, 0.2, 0.12] },
   sprint: { pos: [0.08, -0.105, -0.3], rot: [-0.55, 0.55, 0.25] },
   lowered: { pos: [0.17, -0.362, -0.225], rot: [-0.85, 0.8, -0.3] },
   ads: 0.34,
@@ -139,7 +143,7 @@ const PISTOL_POSE = {
   fov: [55, 46],
 };
 const LONG_POSE = {
-  hip: { pos: [0.105, -0.118, -0.225], rot: [0.045, 0.2, 0.06] },
+  hip: { pos: [0.15, -0.135, -0.215], rot: [0.02, 0.08, 0.05] },
   sprint: { pos: [0.16, -0.225, -0.2], rot: [0.2, 0.7, 0.15] }, // a low carry across the body, muzzle a little up and to the left: the gun runs under the middle of the view, never through it (tests/viewmodel.test.js)
   lowered: { pos: [0.13, -0.4, -0.12], rot: [-0.8, 0.5, -0.2] },
   ads: 0.2,
@@ -150,12 +154,12 @@ const LONG_POSE = {
 };
 export const POSES = {
   pistol: PISTOL_POSE,
-  revolver: { ...PISTOL_POSE, ads: 0.25, hip: { pos: [0.14, -0.07, -0.33], rot: [0.1, 0.45, 0.15] }, kick: [1.2, 9.5, 0.5, 1.6, 2.4] },
-  smg: { ...LONG_POSE, hip: { pos: [0.1, -0.112, -0.2], rot: [0.05, 0.21, 0.07] }, ads: 0.17, kick: [0.5, 1.5, 0.1, 0.6, 0.8] },
-  shotgun: { ...LONG_POSE, ads: 0.08, adsRot: [0.02, 0, 0], kick: [2.6, 6.5, 0.4, 1.2, 1.6] },
+  revolver: { ...PISTOL_POSE, ads: 0.25, hip: { pos: [0.15, -0.08, -0.345], rot: [0.06, 0.2, 0.12] }, kick: [1.2, 9.5, 0.5, 1.6, 2.4] },
+  smg: { ...LONG_POSE, hip: { pos: [0.13, -0.092, -0.235], rot: [0.015, 0.09, 0.05] }, ads: 0.17, kick: [0.5, 1.5, 0.1, 0.6, 0.8] },
+  shotgun: { ...LONG_POSE, hip: { pos: [0.19, -0.195, -0.25], rot: [0.035, 0.085, 0.12] }, ads: 0.08, adsRot: [0.02, 0, 0], kick: [2.6, 6.5, 0.4, 1.2, 1.6] },
   rifle: { ...LONG_POSE, kick: [0.7, 1.9, 0.12, 0.6, 0.8] },
-  lmg: { ...LONG_POSE, hip: { pos: [0.11, -0.14, -0.22], rot: [0.04, 0.2, 0.05] }, kick: [0.8, 1.7, 0.12, 0.7, 0.9] },
-  special: { ...LONG_POSE, kick: [1.2, 3.0, 0.2, 0.8, 1.0] },
+  lmg: { ...LONG_POSE, hip: { pos: [0.195, -0.205, -0.225], rot: [0.045, 0.09, 0.2] }, kick: [0.8, 1.7, 0.12, 0.7, 0.9] },
+  special: { ...LONG_POSE, hip: { pos: [0.15, -0.11, -0.3], rot: [0.05, 0.14, 0.1] }, kick: [1.2, 3.0, 0.2, 0.8, 1.0] },
 };
 export const poseFor = (cls, over) => (over ? { ...(POSES[cls] || PISTOL_POSE), ...over } : POSES[cls] || PISTOL_POSE);
 

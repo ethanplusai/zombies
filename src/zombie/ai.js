@@ -32,15 +32,34 @@ export const AI = {
   playerShove: 1.5,    // ...but no faster than this (m/s), and not at all while attacking
   playerFloor: 0.3,    // hard: never closer than this (the camera is never inside a body)
   turnRate: 2.4,       // rad/s while walking
-  windupTurn: 1.6,     // rad/s while winding up an attack
+  turnRamp: 0.15,      // s for a turn to build up to full speed from standing
+  windupTurn: 3.5,     // rad/s while winding up a swing (it follows a player moving across its front)
   thinkEvery: 0.1,     // s between flow-field queries per zombie when the field has dirInto
   requery: 0.6,        // without dirInto: query again after this much travel (m)...
   requeryMax: 1.0,     // ...or this long (s), whichever comes first
   directRange: 2.5,    // m: closer than this, walk straight at the player
   stopDist: 0.8,       // m: stop walking this close to the player
   maxDy: 2.0,          // m: player feet must be within this height of the zombie's to be reached (a raised arm reaches someone standing on a dumpster or a tailgate)
-  startCos: 0.7,       // facing within ~45 deg to start an attack
-  frontCos: 0.5,       // within ~60 deg at the end of the wind-up for the hit to land
+  // The swing. It starts when the player is in reach now, or will be when the blow lands (the
+  // player's position led by its velocity over the wind-up and the strike), and it lands on the
+  // first frame of the strike (wind-up end to wind-up end + strikeHold) the player is within
+  // reach + strikeSlack (the lunge carries the hands that far; not the brute's, whose reach is long
+  // already) in front of it or level with its shoulders (hitCos), never behind. These are the
+  // values at full strength (env.swing 1, from round 3, against a moving player); `eased` holds them
+  // at strength 0 (round 1, or a player standing still: a swing at where the player stands, landing
+  // in front of it only), lerped between.
+  startCos: 0.0,       // the point it swings at within 90 deg of its facing to start a swing
+  leadRange: 2.5,      // m past its reach: a player further away than this starts no swing yet
+  strikeHold: 0.1,     // s the blow stays dangerous after the wind-up
+  strikeSlack: 0.1,    // m past the reach the blow connects at (the lunge)
+  hitCos: 0.0,         // the player within 90 deg of its facing (directly beside counts) for the blow to land
+  eased: { startCos: 0.7, hitCos: 0.5, windupTurn: 1.6, strikeHold: 0, strikeSlack: 0 },
+  moveFrom: 1.0,       // m/s: a player slower than this gets the eased swing...
+  moveFull: 3.0,       // ...one this fast or faster the full one
+  // a swing reaches a player whose feet are at most armDy above or below its own; up to maxDy when
+  // both stand on stairs, or when the player stands on something (a dumpster, a tailgate) the zombie
+  // is beside and not under
+  armDy: 0.9,
   stuckTime: 6,        // s without getting closer -> respawn
   stuckGain: 0.5,      // m of path distance that counts as getting closer
   stuckMove: 2,        // m of travel that also counts as progress (following a fleeing player)
@@ -59,6 +78,7 @@ export const AI = {
   // swing through the opening once at most breachBoards are left (env.breachBoards).
   pathSlack: 1.0,
   reachSlack: 0.5,
+  fieldLag: 1.0,       // m: the field follows the player a few times a second, so a running player's path distance trails it by up to this
   climbOut: 0.65,      // m inside the fence plane a climb that timed out (env.climbMax) is put
 };
 
@@ -92,6 +112,8 @@ export function createCrowd(cap) {
     // a swing made from a window while tearing its boards goes back to tearing (ret = TEAR) with the
     // tear clock it left (tearT)
     ret: new Uint8Array(cap), tearT: f(),
+    // turning speed now (rad/s): it builds up over AI.turnRamp s, so a turn starts with weight
+    turnV: f(),
     count: 0,
   };
 }
@@ -105,7 +127,7 @@ export function addAgent(c, x, z, yaw, speed, t = 0) {
     c.dx[i] = 0; c.dz[i] = 0; c.pathD[i] = Infinity;
     c.y[i] = 0; c.layer[i] = 0; c.reach[i] = 0; c.windup[i] = 0; c.coolT[i] = 0;
     c.slamEvery[i] = 0; c.slamT[i] = 0; c.slamR[i] = 0; c.slamWindup[i] = 0; c.fuseR[i] = 0; c.fuseDelay[i] = 0;
-    c.atk[i] = 0; c.lure[i] = 0; c.win[i] = 0; c.wait[i] = 0; c.ret[i] = 0; c.tearT[i] = 0;
+    c.atk[i] = 0; c.lure[i] = 0; c.win[i] = 0; c.wait[i] = 0; c.ret[i] = 0; c.tearT[i] = 0; c.turnV[i] = 0;
     placeAgent(c, i, x, z, yaw, t);
     c.count++;
     return i;
@@ -145,8 +167,42 @@ function resetWindow(c, i, t, best) {
   c.wT[i] = t; c.wX[i] = c.x[i]; c.wZ[i] = c.z[i]; c.wBest[i] = best;
 }
 
+// Is the player in reach of a swing begun now, at some moment of its strike? The player's offset
+// (hx, hz) is carried on at its velocity (vx, vz) over the wind-up and the strike; the nearest point
+// of that stretch must be within reach and within AI.startCos of the zombie's facing (it turns to
+// follow during the wind-up). A player standing still: in reach now.
+function swingAt(c, i, hx, hz, vx, vz, reach, windup, hold, startCos) {
+  const tw = c.windup[i] || windup;
+  const ax = hx + vx * tw, az = hz + vz * tw;
+  const sx = vx * hold, sz = vz * hold;
+  const s2 = sx * sx + sz * sz;
+  const k = s2 > 1e-12 ? clamp(-(ax * sx + az * sz) / s2, 0, 1) : 0;
+  const qx = ax + sx * k, qz = az + sz * k;
+  const qd = Math.hypot(qx, qz);
+  if (qd > reach) return false;
+  return qd < 1e-6 || (Math.sin(c.yaw[i]) * qx + Math.cos(c.yaw[i]) * qz) / qd >= startCos;
+}
+
+// Can a swing from feet at y reach the player's feet at py (pdy = |py - y|)? See AI.armDy.
+function armReaches(obstacles, x, z, y, px, pz, py, pdy) {
+  if (pdy <= AI.armDy) return true;
+  if (pdy > AI.maxDy || !obstacles) return false;
+  const lo = Math.min(y, py), hi = Math.max(y, py);
+  const below = py > y ? obstacles.standOn(x, z, y) : obstacles.standOn(px, pz, py);
+  const above = py > y ? obstacles.standOn(px, pz, py) : obstacles.standOn(x, z, y);
+  if (above === 1 && below === 1) return true;              // the same flight of stairs
+  // the one above on a raised thing the one below stands beside, with no floor over the one below
+  return above === 2 && !obstacles.overhead(py > y ? x : px, py > y ? z : pz, lo, hi);
+}
+
+// Turns toward ang at up to `rate`, the turning speed building up from rest over AI.turnRamp s and
+// falling as the facing arrives.
 function turnTo(c, i, ang, rate, dt) {
-  c.yaw[i] += clamp(angDiff(ang, c.yaw[i]), -rate * dt, rate * dt);
+  const err = angDiff(ang, c.yaw[i]);
+  const v = Math.min(rate, c.turnV[i] + (rate * dt) / AI.turnRamp);
+  const step = clamp(err, -v * dt, v * dt);
+  c.yaw[i] += step;
+  c.turnV[i] = dt > 0 ? Math.abs(step) / dt : 0;
 }
 
 // Distance from an agent to its fence plane (positive while still outside).
@@ -157,17 +213,31 @@ export function fenceGap(c, i) {
 // env: { t, px, py, pz, pAlive, field ({dir, dist, dirInto?} | null), tune (tuning.walker), hooks,
 //        lureField ({dir, dist, dirInto?} | null), lx, ly, lz (the lure, for agents with c.lure),
 //        tearEvery (s a board), climbMax (s a climb may last, whatever the animator does),
-//        breachBoards (a tearing zombie swings through its window at most this many boards left) }
+//        breachBoards (a tearing zombie swings through its window at most this many boards left),
+//        pvx, pvz (the player's velocity, m/s; default 0), swing (0..1, default 1: the swing's
+//        strength this round, see AI.eased), obstacles (createObstacles result: a wall between a
+//        zombie and the player stops its swing) }
 // hooks: attackStart(i, kind), attackEnd(i, landed, dirX, dirZ, kind) (kind 0 swing, 1 slam; dir from
 //        the player toward the zombie), climb(i), stuck(i), boards(i) -> boards left at i's window,
 //        tear(i) -> boards left after tearing one, fuse(i) (a bloater starts to burst), burst(i)
-//        (it bursts: the hook removes the agent)
+//        (it bursts: the hook removes the agent), through(i, px, pz) -> does the line from agent i to
+//        the player pass through the opening of the window it is tearing
 export function crowdThink(c, dt, env) {
   const { t, px, py, pz, pAlive, field, tune, hooks } = env;
   const lureField = env.lureField || null, lx = env.lx, lz = env.lz, ly = env.ly || 0;
   const tearEvery = env.tearEvery || 0.9;
   const climbMax = env.climbMax || 5;
   const breachBoards = env.breachBoards ?? 3;
+  // the swing's strength (AI.eased at 0, the AI values at 1): this round's (env.swing), and only for a
+  // player on the move (none standing still, full from AI.moveFull m/s), so a player who stands and
+  // fights meets the same swings as ever
+  const pv = Math.hypot(env.pvx || 0, env.pvz || 0);
+  const ease = clamp(env.swing ?? 1, 0, 1) * clamp((pv - AI.moveFrom) / (AI.moveFull - AI.moveFrom), 0, 1), E = AI.eased;
+  const pvx = (env.pvx || 0) * ease, pvz = (env.pvz || 0) * ease;
+  const startCos = E.startCos + (AI.startCos - E.startCos) * ease, hitCos = E.hitCos + (AI.hitCos - E.hitCos) * ease;
+  const windupTurn = E.windupTurn + (AI.windupTurn - E.windupTurn) * ease;
+  const strikeHold = E.strikeHold + (AI.strikeHold - E.strikeHold) * ease, strikeSlack = E.strikeSlack + (AI.strikeSlack - E.strikeSlack) * ease;
+  const obstacles = env.obstacles || null;
   for (let i = 0; i < c.cap; i++) {
     const st = c.state[i];
     if (!st) continue;
@@ -195,7 +265,7 @@ export function crowdThink(c, dt, env) {
       // at a boarded window: a board every tearEvery s, then through; a player standing at the window
       // inside its reach is hit through the gap once enough boards are gone
       c.want[i] = 0; c.timer[i] += dt;
-      if (pAlive && !c.busy[i] && c.cool[i] <= 0 && hooks.boards(i) <= breachBoards && Math.abs(py - y) <= AI.maxDy) {
+      if (pAlive && !c.busy[i] && c.cool[i] <= 0 && hooks.boards(i) <= breachBoards && Math.abs(py - y) <= AI.armDy) {
         const hx = px - x, hz = pz - z, hd = Math.hypot(hx, hz);
         const inside = c.fnx[i] * px + c.fnz[i] * pz > c.fd[i];
         if (inside && hd <= (c.reach[i] || tune.reach) && c.fuseR[i] <= 0) {
@@ -248,11 +318,22 @@ export function crowdThink(c, dt, env) {
     if (st === WINDUP) {
       const slam = c.atk[i] === 1;
       const reach = c.reach[i] || tune.reach;
+      const tw = slam ? c.slamWindup[i] : c.windup[i] || tune.windup;
       c.want[i] = 0; c.timer[i] += dt;
-      if (!slam) turnTo(c, i, toPlayer, AI.windupTurn, dt);
-      if (c.timer[i] >= (slam ? c.slamWindup[i] : c.windup[i] || tune.windup) - 1e-9) {
-        const fc = hd > 1e-6 ? (Math.sin(c.yaw[i]) * hx + Math.cos(c.yaw[i]) * hz) / hd : 1;
-        const landed = pAlive && pdy <= AI.maxDy && (slam ? hd <= c.slamR[i] : hd <= reach && fc >= AI.frontCos);
+      if (!slam) turnTo(c, i, toPlayer, windupTurn, dt);
+      if (c.timer[i] >= tw - 1e-9) {
+        // a slam lands or misses at once; a swing lands on the first frame of its strike the player
+        // is in reach in front of it or beside it with no wall between (one swung from a window it
+        // is tearing: through the window's opening), and misses when the strike is over
+        let landed;
+        if (slam) landed = pAlive && pdy <= AI.maxDy && hd <= c.slamR[i];
+        else {
+          const fc = hd > 1e-6 ? (Math.sin(c.yaw[i]) * hx + Math.cos(c.yaw[i]) * hz) / hd : 1;
+          const slack = c.slamEvery[i] > 0 ? 0 : strikeSlack;
+          landed = pAlive && hd <= reach + slack && fc >= hitCos && armReaches(obstacles, x, z, y, px, pz, py, pdy) &&
+            (c.ret[i] === TEAR ? !hooks.through || hooks.through(i, px, pz) : !obstacles || !obstacles.blocks(x, z, px, pz, y));
+          if (!landed && c.timer[i] < tw + strikeHold - 1e-9) { resetWindow(c, i, t, Infinity); continue; }
+        }
         const l = hd > 1e-6 ? hd : 1;
         c.state[i] = RECOVER; c.timer[i] = 0; c.cool[i] = c.coolT[i] || tune.cooldown;
         if (slam) c.slamT[i] = c.slamEvery[i];
@@ -335,7 +416,7 @@ export function crowdThink(c, dt, env) {
     // (not just the straight one) is inside its range, so never through a wall
     const reachI = c.reach[i] || tune.reach;
     let pathP = 0;
-    if (field && !custom && hd <= Math.max(reachI + 0.3, c.slamR[i], c.fuseR[i])) {
+    if (field && !custom && hd <= Math.max(reachI + AI.leadRange, c.slamR[i], c.fuseR[i])) {
       pathP = lured ? field.dist(x, z, L) : c.pathD[i];
     }
     if (!custom && pAlive && pdy <= AI.maxDy && !c.busy[i]) {
@@ -351,14 +432,13 @@ export function crowdThink(c, dt, env) {
         hooks.attackStart(i, 1);
         resetWindow(c, i, t, Infinity);
         continue;
-      } else if (hd <= reachI && c.cool[i] <= 0 && pathP < reachI + AI.reachSlack) {
-        const fc = hd > 1e-6 ? (Math.sin(c.yaw[i]) * hx + Math.cos(c.yaw[i]) * hz) / hd : 1;
-        if (fc >= AI.startCos) {
-          c.state[i] = WINDUP; c.atk[i] = 0; c.timer[i] = 0; c.want[i] = 0;
-          hooks.attackStart(i, 0);
-          resetWindow(c, i, t, Infinity);
-          continue;
-        }
+      } else if (c.cool[i] <= 0 && hd <= reachI + AI.leadRange && swingAt(c, i, hx, hz, pvx, pvz, reachI, tune.windup, strikeHold, startCos) &&
+        (pathP < reachI + AI.reachSlack || (ease > 0 && pathP < hd + AI.pathSlack + AI.fieldLag)) &&
+        armReaches(obstacles, x, z, y, px, pz, py, pdy) && !(obstacles && obstacles.blocks(x, z, px, pz, y))) {
+        c.state[i] = WINDUP; c.atk[i] = 0; c.timer[i] = 0; c.want[i] = 0;
+        hooks.attackStart(i, 0);
+        resetWindow(c, i, t, Infinity);
+        continue;
       }
     }
 
@@ -493,7 +573,7 @@ export function createObstacles(colliders, { step = 0.32, top = 1.8, cell = 2, m
     x1 = Math.max(x1, b.max[0] + margin); z1 = Math.max(z1, b.max[2] + margin);
   });
   const out = new Float64Array(2);
-  if (!n) return { count: 0, out, push: () => false };
+  if (!n) return { count: 0, out, push: () => false, blocks: () => false, standOn: () => 0, overhead: () => false };
   const cols = Math.max(1, Math.ceil((x1 - x0) / cell)), rows = Math.max(1, Math.ceil((z1 - z0) / cell));
   const start = new Int32Array(cols * rows + 1);
   const span = (k, fn) => {
@@ -543,7 +623,74 @@ export function createObstacles(colliders, { step = 0.32, top = 1.8, cell = 2, m
     out[0] = x; out[1] = z;
     return moved;
   }
-  return { count: n, out, push };
+
+  // Is there a wall between (ax, az) and (bx, bz) at the height of a swing from feet at y (a box
+  // reaching from below y + 1.6 to above y + 1.2: walls and doors, not a counter, a car's bonnet or a
+  // stair)? A box either end stands on or in is not between them. Allocates nothing.
+  function blocks(ax, az, bx, bz, y = 0) {
+    const lo = y + 1.2, hi = y + 1.6;
+    const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - x0) / cell)), i1 = Math.min(cols - 1, Math.floor((Math.max(ax, bx) - x0) / cell));
+    const j0 = Math.max(0, Math.floor((Math.min(az, bz) - z0) / cell)), j1 = Math.min(rows - 1, Math.floor((Math.max(az, bz) - z0) / cell));
+    const dx = bx - ax, dz = bz - az;
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const c = j * cols + i;
+        for (let s = start[c]; s < start[c + 1]; s++) {
+          const kk = items[s];
+          if (stair[kk] || ys[kk * 2 + 1] <= lo || ys[kk * 2] >= hi) continue;
+          const k = kk * 4;
+          const bx0 = box[k], bz0 = box[k + 1], bx1 = box[k + 2], bz1 = box[k + 3];
+          if ((ax >= bx0 && ax <= bx1 && az >= bz0 && az <= bz1) || (bx >= bx0 && bx <= bx1 && bz >= bz0 && bz <= bz1)) continue;
+          // the segment against the box (slabs)
+          let ta = 0, tb = 1;
+          if (Math.abs(dx) < 1e-12) { if (ax < bx0 || ax > bx1) continue; } else {
+            let u = (bx0 - ax) / dx, v = (bx1 - ax) / dx;
+            if (u > v) { const w = u; u = v; v = w; }
+            if (u > ta) ta = u; if (v < tb) tb = v;
+            if (ta > tb) continue;
+          }
+          if (Math.abs(dz) < 1e-12) { if (az < bz0 || az > bz1) continue; } else {
+            let u = (bz0 - az) / dz, v = (bz1 - az) / dz;
+            if (u > v) { const w = u; u = v; v = w; }
+            if (u > ta) ta = u; if (v < tb) tb = v;
+            if (ta > tb) continue;
+          }
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  // What feet at (x, y, z) stand on: 1 a stair step, 2 another box (a dumpster, a landing), 0 the
+  // ground or nothing (a box whose top is within 0.15 m of y under the point).
+  function standOn(x, z, y) {
+    const ci = Math.floor((x - x0) / cell), cj = Math.floor((z - z0) / cell);
+    if (ci < 0 || cj < 0 || ci >= cols || cj >= rows) return 0;
+    const c = cj * cols + ci;
+    let kind = 0;
+    for (let s = start[c]; s < start[c + 1]; s++) {
+      const kk = items[s], k = kk * 4;
+      if (x < box[k] || x > box[k + 2] || z < box[k + 1] || z > box[k + 3]) continue;
+      if (Math.abs(ys[kk * 2 + 1] - y) > 0.15) continue;
+      if (stair[kk]) return 1;
+      kind = 2;
+    }
+    return kind;
+  }
+  // Is there a floor over (x, z) between heights lo and hi (a box over the point whose underside is
+  // more than 0.3 m above lo and no higher than hi)?
+  function overhead(x, z, lo, hi) {
+    const ci = Math.floor((x - x0) / cell), cj = Math.floor((z - z0) / cell);
+    if (ci < 0 || cj < 0 || ci >= cols || cj >= rows) return false;
+    const c = cj * cols + ci;
+    for (let s = start[c]; s < start[c + 1]; s++) {
+      const kk = items[s], k = kk * 4;
+      if (x < box[k] || x > box[k + 2] || z < box[k + 1] || z > box[k + 3]) continue;
+      if (ys[kk * 2] > lo + 0.3 && ys[kk * 2] <= hi) return true;
+    }
+    return false;
+  }
+  return { count: n, out, push, blocks, standOn, overhead };
 }
 
 const px = (p) => (p.pos ? (Array.isArray(p.pos) ? p.pos[0] : p.pos.x) : Array.isArray(p) ? p[0] : p.x);

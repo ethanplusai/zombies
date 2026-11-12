@@ -115,6 +115,13 @@ export const zombies = {
   lure: { radius: 25, stop: 1.2 }, // decoys: zombies within radius m go to it and gather this close
   relocateEvery: 1, // s between checks for zombies left in a zone the player can no longer reach
   respawnRetry: 1,  // s between tries of a stuck respawn that found every spawn point in view
+  // The swing's strength (0..1, src/zombie/ai.js AI and AI.eased): at 1 a zombie swings at where a
+  // moving player will be when the blow lands, the blow stays live a moment, reaches a little further
+  // and lands on a player level with its shoulders, and it turns fast through the wind-up, so running
+  // past one within arm's length is hit; at 0 it swings at where the player stands and the blow lands
+  // in front of it only. `byRound` eases the first rounds in (round 1 at 0, round 2 half way, round 3 three quarters); the
+  // rest are at `strength`.
+  swing: { strength: 1, byRound: { 1: 0, 2: 0.5, 3: 0.75 } },
   climbMax: 5,      // s: a climb (fence or window) ends after this whatever the animator does
   breachBoards: 3,  // a zombie tearing a window's boards swings through it at a player in reach once at most this many are left
   pool,

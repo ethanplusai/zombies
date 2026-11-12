@@ -190,11 +190,19 @@ describe('attack', () => {
     expect(Math.hypot(dir[0], dir[2])).toBeCloseTo(1, 6);
   });
 
-  it('reaches a player standing up to 2 m above it, and not one higher', () => {
+  it('reaches a player up to an arm above it on open ground; up to 2 m only on something it stands beside', () => {
     expect(AI.maxDy).toBeGreaterThanOrEqual(1.9);
-    for (const [y, hits] of [[1.45, true], [2.6, false]]) {
+    expect(AI.armDy).toBeCloseTo(0.9, 6);
+    for (const [y, hits] of [[0.85, true], [1.45, false]]) {
       const { Z, G, step } = setup({ player: [0, y, 0] });
       Z.spawn([0, 0, 0.9]);
+      step(Math.ceil(3 / DT));
+      expect(G.player.damage.mock.calls.length > 0).toBe(hits);
+    }
+    // standing on a 1.45 m dumpster the zombie is beside: reached; on a 2.6 m one: not
+    for (const [y, hits] of [[1.45, true], [2.6, false]]) {
+      const { Z, G, step } = setup({ player: [0, y, 0], colliders: [{ min: [-0.6, 0, -0.6], max: [0.6, y, 0.45] }] });
+      Z.spawn([0, 0, 0.9], { exact: true });
       step(Math.ceil(3 / DT));
       expect(G.player.damage.mock.calls.length > 0).toBe(hits);
     }
@@ -1135,6 +1143,25 @@ describe('layered world', () => {
     expect(hitAt).toBeGreaterThanOrEqual(3); // not before 3 boards are torn
     expect(hits[0].z).toBeLessThan(-32); // from outside the wall
     expect(breaks.length).toBe(6); // and it goes on tearing
+  });
+
+  it('a zombie tearing a window at its edge hits a player through the opening, not one behind the wall beside it', () => {
+    for (const [px, hits] of [[14.1, true], [13.25, false]]) {
+      const { Z, G, step, breaks } = worldSetup({ player: [20, 0, -26], open: ['d1'] });
+      const hit = hitLog(G, Z);
+      Z.spawn(point('sp-w-d2'), { exact: true });
+      // until it is tearing with no more than 3 boards left, the player away from the window
+      for (let f = 0; f < 60 * 20 && !(Z.crowd.state[0] === 6 && breaks.length >= 3); f++) step();
+      expect(Z.crowd.state[0]).toBe(6);
+      // at the window's west edge (the opening is 13.8-15.2), the player inside 0.35 m from the wall
+      Z.crowd.x[0] = 13.85;
+      G.player.pos[0] = px; G.player.pos[2] = -31.5;
+      let swung = 0;
+      G.events.on('zombie:attack', () => { swung++; });
+      step(Math.round(2 / DT));
+      expect(swung).toBeGreaterThan(0); // in reach either way: it swings
+      expect({ px, hit: hit.length > 0 }).toEqual({ px, hit: hits });
+    }
   });
 
   it('a window climb the animator never ends is left after 5 s; the next zombie at that window gets in too', () => {

@@ -7,7 +7,12 @@
 //            a gait clock (cadence = speed / step length) lifts each foot in turn and swings it to
 //            where the body will be; heel strike, flat, heel-off roll about the heel and the ball
 //   pelvis   carried between the feet: sways over the planted foot, drops on the swinging side,
-//            turns with the stride, and sinks when the legs are spread (never over-extends a leg)
+//            turns with the stride, and sinks when the legs are spread (never over-extends a leg):
+//            it starts down in the second half of a swing toward the height the landing needs, so
+//            each step is a fall onto the leading foot and a rise over it, with no corner in it
+//   weight   the root's turning and its change of pace are measured each frame: a turn reaches the
+//            body from the ground up (feet step round, pelvis, chest, the head last and a little
+//            past), banked into; picking up speed throws the trunk forward, stopping rocks it back
 //   spine    lean and hunch from the seed, shoulders counter-rotating the pelvis, lurch over the
 //            stance leg; head forward and lolling
 //   arms     hang by gravity and trail on springs; rise toward the target when it is near
@@ -36,7 +41,12 @@ const ARM = [
 const SWELL = [B.hips, B.spine1, B.spine2];
 const TIP_TOP = [3, 4, 5, 6];   // shoulders, neck, head
 const RAG_J = [B.thighL, B.thighR, B.spine1, B.upperArmL, B.upperArmR, B.neck, B.head, B.foreArmL, B.handL, B.foreArmR, B.handR, B.shinL, B.footL, B.shinR, B.footR];
-const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+// a - b brought into (-pi, pi]
+const angDiff = (a, b) => { let d = a - b; if (d > Math.PI || d < -Math.PI) d -= TAU * Math.round(d / TAU); return d; };
+// the lower of two heights with the corner between them rounded off over k (never above either)
+const smin = (a, b, k) => { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; };
+const SWING_MAX = 0.62;   // s: the longest a walking foot hangs in the air, however slow the walk
+const STRIDE = 1.22;   // a walker's step against the step length its seed draws: long slow steps, not a patter
 const xyz = (p, i) => (p ? (p.x !== undefined ? (i === 0 ? p.x : i === 1 ? p.y : p.z) : p[i]) : 0);
 
 // Bare feet have a few toe-tip vertices that carry no weights and so follow the hips (body files,
@@ -120,15 +130,21 @@ export function createAnimator(zombie) {
   }
   const waddle = isBloat ? 2.3 : isBrute ? 1.5 : 1;
   const stiff = isArmoured ? 0.5 : isBrute ? 1.7 : 1;
+  const stiff2 = isArmoured ? 0.4 : 1;   // how loosely the trunk and head are carried
   // the trunk a bloater swells (and a pooled body is given back as it was built)
   if (!zombie.baseScale) zombie.baseScale = pose.scale.slice();
   else pose.scale.set(zombie.baseScale);
   const stand = LEGLEN * ch.crouch + ankleH - hipY;
+  const REACH2 = (LEGLEN * 0.992) ** 2, RISE = 0.3 * hS * (isBrute ? 1.5 : 1);
 
   // ---- state -----------------------------------------------------------------------------------
   let state = 'idle', sT = 0, time = r.range(0, 10), started = false, settled = false;
   let Rx = 0, Ry = 0, Rz = 0, yaw = 0, cy = 1, sy = 0;
   let vCur = 0, phase = r.next(), cycleT = 1, prevSpeed = 0, rootAcc = 0;
+  let gaitOn = false;                    // the walking clock is running
+  let yawPrev = 0, turnW = 0, accS = 0;   // rad/s the root is being turned, m/s^2 its pace is changing (both smoothed)
+  let turnLive = false;
+  const sTurn = new Float32Array(4);     // how far the chest and the head trail a turn: [x, v] pairs
   let target = null, lookYaw = 0, lookPitch = 0, tDist = 99;
   const targetBuf = [0, 0, 0], _dir = [0, 0, -1];
   const rag = createRagdoll();
@@ -141,7 +157,7 @@ export function createAnimator(zombie) {
   // feet: world plant point, yaw, swing bookkeeping, and this frame's ankle in model space
   const foot = [0, 1].map((i) => ({
     side: i === 0 ? 1 : -1, px: 0, pz: 0, yaw: 0, planted: true, s: 0, dur: 0.4, sx: 0, sz: 0, syaw: 0, tx: 0, tz: 0, mode: 0, lift: 0.05,
-    st: 0, sd: 0.6, walkPlant: false, push: 0, ax: 0, ay: ankleH, az: 0, pitch: 0, roll: 0, myaw: 0, y: 0, sup: 1, poleY: 0, bad: false,
+    st: 0, sd: 0.6, walkPlant: false, push: 0, lx: 0, lz: 0, lf: 0, lu: ankleH, hold: 0.4, cap: 0.5, ax: 0, ay: ankleH, az: 0, pitch: 0, roll: 0, myaw: 0, y: 0, sup: 1, poleY: 0, bad: false,
   }));
   if (ch.limpSide >= 0) foot[ch.limpSide].bad = true;
   // smoothed body pose
@@ -522,6 +538,7 @@ export function createAnimator(zombie) {
   function init() {
     started = true;
     readRoot();
+    yawPrev = yaw;
     for (const f of foot) {
       const mx = f.side * ch.stanceW, mz = f.side * 0.03 * (ch.domArm ? 1 : -1);
       f.px = toWorldX(mx, mz); f.pz = toWorldZ(mx, mz); f.yaw = yaw + f.side * ch.toeOut[f.side > 0 ? 0 : 1];
@@ -544,6 +561,14 @@ export function createAnimator(zombie) {
     const f = foot[i];
     f.planted = false; f.s = 0; f.dur = dur; f.mode = mode;
     f.sx = f.px; f.sz = f.pz; f.syaw = f.yaw; f.tx = tx; f.tz = tz; f.push = f.pitch;
+    // how long it will then stand, and the furthest ahead it may be set down: fixed for this step, so a
+    // change of gait while it is in the air does not move where it lands
+    f.hold = Math.max(0.2, cycleT - dur); f.cap = ch.stepLen * (runW > 0.5 ? 1.3 : 0.8);
+    f.lx = mode === 0 ? f.side * ch.stanceW : toModelX(tx, tz); f.lz = mode === 0 ? 0.1 : toModelZ(tx, tz);
+    // where the ankle is over the contact point at the moment the foot comes down (heel first, or toe first when dragged)
+    const p = mode === 0 ? (f.bad && ch.drag ? 0.22 : -0.2) : -0.05, c = Math.cos(p), sn = Math.sin(p);
+    f.lf = p > 0 ? ballFwd - ballFwd * c + ankleH * sn : -heelBack + heelBack * c + ankleH * sn;
+    f.lu = p > 0 ? ballFwd * sn + ankleH * c : -heelBack * sn + ankleH * c;
     const drag = f.bad && ch.drag;
     f.lift = mode === 0 ? (runW > 0.5 ? r.range(0.13, 0.2) : isBrute ? 0.1 : drag ? 0.004 : f.bad ? 0.025 : r.range(0.04, 0.075)) * hS : 0.035 * hS;
     pending[i] = false;
@@ -566,14 +591,19 @@ export function createAnimator(zombie) {
         const s = Math.min(1, f.s);
         if (f.mode === 0) {
           // where the body will be when this foot comes down, plus the lead it lands with
-          const lead = v * Math.max(0.2, cycleT - f.dur) * (f.bad ? 0.5 - 0.22 * ch.limp : 0.5 + (foot[1 - i].bad ? 0.1 * ch.limp : 0)) + 0.02;
-          const mz = v * (1 - s) * f.dur + lead;
+          // (the pace it will have by then: a body picking up speed reaches further, one pulling up less)
+          const left = (1 - s) * f.dur, vL = clamp(v + accS * left, 0, v + 0.6);
+          const lead = Math.min(vL * f.hold * (f.bad ? 0.5 - 0.22 * ch.limp : 0.5 + (foot[1 - i].bad ? 0.1 * ch.limp : 0)), f.cap) + 0.02;
+          const mz = (v + vL) * 0.5 * left + lead;
+          f.lz = lead;
           f.tx = toWorldX(f.side * ch.stanceW, mz); f.tz = toWorldZ(f.side * ch.stanceW, mz);
         }
         const drag = f.bad && ch.drag && f.mode === 0;
         const e = drag ? s * (0.6 + 0.4 * s) : s * s * (3 - 2 * s);
         f.px = lerp(f.sx, f.tx, e); f.pz = lerp(f.sz, f.tz, e);
-        f.yaw = f.syaw + angDiff(yaw + f.side * ch.toeOut[idx] * (drag ? 1.6 : 1), f.syaw) * e;
+        // set down turned a little past the body, the way it is turning, so the turn is shared between
+        // this stance and the next instead of twisting one leg
+        f.yaw = f.syaw + angDiff(yaw + f.side * ch.toeOut[idx] * (drag ? 1.6 : 1) + clamp(turnW * 0.2, -0.5, 0.5), f.syaw) * e;
         f.y = f.lift * Math.sin(Math.PI * Math.min(1, s * 1.08));
         const strike = f.mode === 0 ? (drag ? -0.22 : 0.2) : 0.05;
         f.pitch = lerp(f.push, -strike, smooth(0.15, 0.95, s)) + (drag ? 0 : (0.25 + 0.75 * runW) * Math.sin(Math.PI * s) * (f.mode === 0 ? 1 : 0.3));
@@ -587,7 +617,7 @@ export function createAnimator(zombie) {
           const heelOff = (drag ? 0.2 : 0.62) * clamp(v / 1.2, 0.3, 1.1) * smooth(0.58, 1.02, u);
           f.pitch = u < 0.14 ? -strike * (1 - u / 0.14) : heelOff;
         } else f.pitch += (0 - f.pitch) * Math.min(1, dt * 8);
-        if (pending[i] && (foot[1 - i].planted || foot[1 - i].s > (runW > 0.5 ? 0.3 : 0.75))) startSwing(i, runW > 0.5 ? clamp(0.58 * cycleT, 0.16, 0.5) : clamp(ch.swing * cycleT * (f.bad ? 1.12 : foot[1 - i].bad ? 0.88 : 1), 0.22, 0.95), 0, 0, 0);
+        if (pending[i] && (foot[1 - i].planted || foot[1 - i].s > (runW > 0.5 ? 0.3 : 0.94))) startSwing(i, runW > 0.5 ? clamp(0.58 * cycleT, 0.16, 0.5) : clamp(ch.swing * cycleT * (f.bad ? 1.12 : foot[1 - i].bad ? 0.88 : 1), 0.22, SWING_MAX), 0, 0, 0);
       }
       f.sup += ((f.planted ? 1 : 0) - f.sup) * Math.min(1, dt * 9);
       // ankle from the contact point: roll about the heel while the toe is up, about the ball once the heel lifts
@@ -601,18 +631,20 @@ export function createAnimator(zombie) {
     // standing corrections: a foot too far from where it belongs steps home
     stepCool -= dt;
     if (!walking && foot[0].planted && foot[1].planted && stepCool <= 0) {
+      // (being turned on the spot, the feet are walked round in quick short steps)
+      const turning = Math.abs(turnW) > 0.6;
       let worst = -1, wErr = state === 'stagger' ? 0.1 : state === 'attack' ? 0.3 : 0.2;
       for (let i = 0; i < 2; i++) {
         const f = foot[i];
         const hx = f.side * ch.stanceW, hz = api.rootSpeed * 0.18;
-        const err = Math.hypot(toModelX(f.px, f.pz) - hx, toModelZ(f.px, f.pz) - hz) + Math.abs(angDiff(f.yaw, yaw + f.side * 0.2)) * 0.25;
+        const err = Math.hypot(toModelX(f.px, f.pz) - hx, toModelZ(f.px, f.pz) - hz) + Math.abs(angDiff(f.yaw, yaw + f.side * ch.toeOut[i])) * 0.42;
         if (err > wErr) { wErr = err; worst = i; }
       }
       if (worst >= 0) {
         const f = foot[worst];
         const jx = r.range(-0.03, 0.03), jz = r.range(-0.05, 0.05) + api.rootSpeed * 0.3;
-        startSwing(worst, state === 'stagger' ? 0.2 : 0.34, 1, toWorldX(f.side * ch.stanceW + jx, jz), toWorldZ(f.side * ch.stanceW + jx, jz));
-        stepCool = state === 'stagger' ? 0.05 : 0.15;
+        startSwing(worst, state === 'stagger' ? 0.2 : turning ? 0.23 : 0.34, 1, toWorldX(f.side * ch.stanceW + jx, jz), toWorldZ(f.side * ch.stanceW + jx, jz));
+        stepCool = state === 'stagger' ? 0.05 : turning ? 0.02 : 0.15;
       }
     }
   }
@@ -629,6 +661,12 @@ export function createAnimator(zombie) {
     if (!gore) gore = ensureGore();
     readRoot();
     time += dt; sT += dt;
+    // how fast the simulation is turning the root (a placement or a snap to a fence is not a turn)
+    let dy = yaw - yawPrev;
+    if (dy > Math.PI) dy -= TAU; else if (dy < -Math.PI) dy += TAU;
+    yawPrev = yaw;
+    turnW += ((dy > 0.5 || dy < -0.5 ? 0 : clamp(dy / Math.max(dt, 1e-3), -4, 4)) - turnW) * Math.min(1, dt * 9);
+    if (dy === 0 && turnW < 0.02 && turnW > -0.02) turnW = 0;
     const dead = state === 'dead';
     const inClip = dead || state === 'climb' || state === 'window';
     let walkW = 0;
@@ -654,29 +692,44 @@ export function createAnimator(zombie) {
       if (state === 'attack') direct = prone > 0.5 ? 0 : attackSpeed();
       else if (state === 'slam' || state === 'tear' || state === 'burst') direct = 0;
       else if (state === 'stagger') direct = stagDir * 1.5 * Math.exp(-sT * 4.5);
-      vCur += clamp(vT - vCur, -3 * dt, 2 * dt);
+      const dv = clamp(vT - vCur, -3 * dt, 2 * dt);
+      vCur += dv;
+      accS += (dv / Math.max(dt, 1e-3) - accS) * Math.min(1, dt * 6);
       const buck = Math.max(sBuckle[0], sBuckle[2], 0);
       const v = vCur * (1 - 0.5 * Math.min(1, buck));
       runW += ((running && v > 1.6 ? 1 : 0) - runW) * Math.min(1, dt * 5);
+      // the long stride with both feet off the ground belongs to real speed: a runner held to a
+      // walk (turning hard, closing on a fence, pulling up) walks
+      const fast = running && runW > 0.5;
       if (prone > 0.5) crawlClock(dt, v, walking);
       else if (walking && v > 0.04) {
         // a run is long strides off the toes with both feet in the air between them; the brute's is a
         // lumber: long heavy steps, never off the ground
-        const S = running ? ch.stepLen * (1.7 + 0.25 * Math.min(v / 3.8, 1.2)) : ch.stepLen * (0.72 + 0.28 * Math.min(v / 1.3, 1.5)) * (isBrute ? 1.15 : 1);
-        cycleT = (2 * S) / v;
+        const S = fast ? ch.stepLen * (1.7 + 0.25 * Math.min(v / 3.8, 1.2)) : ch.stepLen * (0.72 + 0.28 * Math.min(v / 1.3, 1.5)) * (isBrute ? 1.15 : STRIDE);
+        // turning costs steps too: a body being turned on the spot still has to walk its feet round
+        cycleT = (2 * S) / (v + Math.abs(turnW) * 0.2);
+        const pR = 0.5 + (ch.limpSide === 1 ? 0.06 : ch.limpSide === 0 ? -0.06 : 0) * ch.limp;
+        // setting off: the first step is taken at once, with the foot that is further behind, so the
+        // body does not slide away from two planted feet while the clock comes round
+        if (!gaitOn) {
+          gaitOn = true;
+          const first = toModelZ(foot[0].px, foot[0].pz) <= toModelZ(foot[1].px, foot[1].pz) ? 0 : 1;
+          phase = first ? pR : 0; pending[first] = true; pending[1 - first] = false;
+        }
         const p0 = phase;
         phase += dt / cycleT;
-        const pR = 0.5 + (ch.limpSide === 1 ? 0.06 : ch.limpSide === 0 ? -0.06 : 0) * ch.limp;
         if (phase >= 1) { phase -= 1; pending[0] = true; }
         if (p0 < pR && phase >= pR) pending[1] = true;
         for (let i = 0; i < 2; i++) {
-          if (pending[i] && foot[i].planted && (foot[1 - i].planted || (running && foot[1 - i].s > 0.3))) startSwing(i, running ? clamp(0.58 * cycleT, 0.16, 0.5) : clamp(ch.swing * cycleT * (foot[i].bad ? 1.12 : foot[1 - i].bad ? 0.88 : 1), 0.22, 0.95), 0, 0, 0);
+          // a planted foot the body has turned away from is lifted early
+          if (turnW !== 0 && !pending[i] && foot[i].planted && foot[i].st > 0.1 && foot[1 - i].planted && foot[1 - i].st > 0.06 && Math.abs(angDiff(foot[i].yaw, yaw + foot[i].side * ch.toeOut[i])) > 0.5) pending[i] = true;
+          if (pending[i] && foot[i].planted && (foot[1 - i].planted || (fast && foot[1 - i].s > 0.3))) startSwing(i, fast ? clamp(0.58 * cycleT, 0.16, 0.5) : clamp(ch.swing * cycleT * (foot[i].bad ? 1.12 : foot[1 - i].bad ? 0.88 : 1) / (1 + 0.3 * Math.abs(turnW)), 0.22, SWING_MAX), 0, 0, 0);
         }
         // the lurch: the body surges and checks within each stride; the mean stays v
-        api.rootSpeed = v * (1 + ch.lurch * (running ? 0.3 : 1) * Math.cos(TAU * 2 * phase + 0.6) + 0.25 * ch.limp * (running ? 0 : 1) * Math.sin(TAU * phase + (ch.limpSide === 1 ? Math.PI : 0)));
+        api.rootSpeed = v * (1 + ch.lurch * (fast ? 0.3 : 1) * Math.cos(TAU * 2 * phase + 0.6) + 0.25 * ch.limp * (fast ? 0 : 1) * Math.sin(TAU * phase + (ch.limpSide === 1 ? Math.PI : 0)));
       } else {
         api.rootSpeed = direct !== null ? direct : v;
-        pending[0] = pending[1] = false;
+        pending[0] = pending[1] = false; gaitOn = false;
       }
       walkW = smooth(0.05, 0.6, v);
       feet(dt, v, walking && v > 0.04 && prone <= 0.5);
@@ -705,17 +758,24 @@ export function createAnimator(zombie) {
     // legs must reach: cap the pelvis height by what each planted leg allows
     if (!inClip) {
       qEuler(_q, 0, pel[3] + sChest[0] * 0.15, pel[4], pel[5]);
-      let cap = 9;
+      const b = Math.max(sBuckle[0], 0) + Math.max(sBuckle[2], 0);
+      let y = pel[1] + sPel[2] - 0.13 * Math.min(1, b);
       for (let i = 0; i < 2; i++) {
         const f = foot[i];
         vRot(_v, _q, 0, off[LEG[i].b1 * 3], off[LEG[i].b1 * 3 + 1], off[LEG[i].b1 * 3 + 2]);
-        const hx = pel[0] + sPel[0] + _v[0] - f.ax, hz = pel[2] + sPel[4] + _v[2] - f.az;
-        const lim = (LEGLEN * 0.992) ** 2 - hx * hx - hz * hz;
-        cap = Math.min(cap, f.ay + Math.sqrt(Math.max(0.01, lim)) - _v[1]);
+        const px = pel[0] + sPel[0] + _v[0], pz = pel[2] + sPel[4] + _v[2];
+        let hx = px - f.ax, hz = pz - f.az;
+        // (a foot in the air need not be reached exactly in the middle of its swing: the leg trails)
+        y = smin(y, f.ay + Math.sqrt(Math.max(0.01, REACH2 - hx * hx - hz * hz)) - _v[1] + (f.planted || runW < 0.01 ? 0 : 0.3 * runW * Math.sin(Math.PI * Math.min(1, f.s))), 0.04);
+        // a foot in the air: where it will come down is known, so the pelvis is already on its way to
+        // the height that landing needs and arrives with the foot
+        if (!f.planted && f.s < 1) {
+          hx = px - f.lx; hz = pz - f.lz - f.lf;
+          y = smin(y, f.lu + Math.sqrt(Math.max(0.01, REACH2 - hx * hx - hz * hz)) - _v[1] + 0.1 * (1 - smooth(0.1, 0.9, f.s)), 0.04);
+        }
       }
-      const b = Math.max(sBuckle[0], 0) + Math.max(sBuckle[2], 0);
-      const want = pel[1] + sPel[2] - 0.13 * Math.min(1, b);
-      pelY = prone > 0.5 ? pel[1] : Math.min(want, cap);
+      // down as fast as the legs demand; up only as fast as a loaded knee straightens
+      pelY = prone > 0.5 ? pel[1] : Math.min(y, pelY + RISE * (1 + 3 * runW) * dt);
     } else pelY = pel[1];
 
     // ---- torso, then limbs by IK
@@ -792,7 +852,8 @@ export function createAnimator(zombie) {
         continue;
       }
       const py = f.poleY;
-      const kx = Math.sin(f.myaw) * 0.6 + Lg.side * 0.18, kz = Math.cos(f.myaw) * 0.6 + 0.4;
+      const ky = clamp(f.myaw, -0.8, 0.8);
+      const kx = Math.sin(ky) * 0.6 + Lg.side * 0.18, kz = Math.cos(ky) * 0.6 + 0.4;
       // py > 0 lifts the knee, py < 0 splays it sideways along the ground (the far side of a fence)
       const pa = Math.abs(py);
       ik2(_q, 0, _q, 4, hx, hy, hz, f.ax, f.ay, f.az, L1, L2, kx * (1 - pa) + (py < 0 ? Lg.side * pa : 0), (py > 0 ? py : 0.12 * pa) + 0.05, kz * (1 - pa) + 0.15 * (1 - pa), 1, corr, i * 8, i * 8 + 4, Lg.side * 0.3, 0.2, 1);
@@ -917,6 +978,24 @@ export function createAnimator(zombie) {
     spT[2] = ch.lean * 0.6 + ch.hunch + 0.05 * walkW + 0.05 * runW;
     spT[3] = -1.5 * pelT[4] + ch.twist;
     spT[4] = lurch * 0.6 - pelT[5] * (isBloat ? 1.3 : 0.5) + ch.shoulderDrop + idle * 0.02 * sway + (isBrute ? 0.1 * (supL - supR) * walkW : 0);
+    // the surge of each step rocks the trunk; a slow seeded wander keeps it from being carried like a board
+    const up = 1 - prone;
+    spT[2] += walkW * (0.015 + 0.3 * ch.lurchLean) * Math.cos(TAU * 2 * phase + 1.5) * (1 - runW);
+    spT[1] += walkW * 0.03 * stiff2 * sway2; spT[3] += walkW * 0.05 * stiff2 * sway;
+    // weight: thrown forward as it picks up speed, rocked back on its heels as it pulls up
+    const al = clamp(accS, -3, 2.2) * up;
+    spT[0] += al * 0.016; spT[2] += al * 0.024; pelT[2] += al * 0.012; pelT[1] -= Math.abs(al) * 0.006;
+    // a turn comes up through the body: the pelvis follows the feet, the chest trails the pelvis, the
+    // head comes round last and swings a little past; the whole body banks into it
+    const tw = clamp(turnW, -3, 3) * up;
+    let bank = 0;
+    if (tw !== 0 || turnLive) {
+      springTo(sTurn, 0, -tw * 0.075, 7, 0.5, dt); springTo(sTurn, 2, -tw * 0.08, 4.5, 0.42, dt);
+      turnLive = tw !== 0 || Math.abs(sTurn[0]) + Math.abs(sTurn[1]) + Math.abs(sTurn[2]) + Math.abs(sTurn[3]) > 2e-3;
+      if (!turnLive) sTurn.fill(0);
+      bank = clamp(tw * (0.25 + vCur) * 0.03, -0.1, 0.1);
+      pelT[4] -= tw * 0.03; spT[3] += sTurn[0]; pelT[5] -= bank * 0.4; spT[4] -= bank * 0.6; spT[1] -= bank * 0.3;
+    }
     // head: forward, tilted, and turned toward the prey within limits
     let ly = 0, lp = 0;
     tDist = 99;
@@ -933,8 +1012,9 @@ export function createAnimator(zombie) {
     const torsoPitch = pelT[3] + spT[0] + spT[2];
     hdT[0] = ch.neckFwd + ch.headFwd * 0.3;
     hdT[1] = -(torsoPitch + hdT[0]) * 0.92 + ch.headFwd * 0.25 - 0.06 + (target ? lookPitch : 0.04 * sway2);
-    hdT[2] = ch.headYaw * (target ? 0.4 : 1) + lookYaw - (pelT[4] + spT[3]) * 0.8;
-    hdT[3] = ch.headRoll - spT[4] * 0.5;
+    hdT[1] -= al * 0.03;
+    hdT[2] = ch.headYaw * (target ? 0.4 : 1) + lookYaw - (pelT[4] + spT[3] - sTurn[0]) * 0.8 + sTurn[2] + walkW * 0.09 * stiff2 * sway2;
+    hdT[3] = ch.headRoll - spT[4] * 0.5 + walkW * 0.07 * stiff2 * sway + bank * 0.5;
     hdT[4] = ch.jaw + (tDist < 3 ? 0.12 * (1 + Math.sin(time * 7.3)) : 0) + 0.25 * runW;
   }
 

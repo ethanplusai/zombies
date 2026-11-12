@@ -5,9 +5,10 @@ const P = tuning.points;
 const MELEE_KILL = tuning.economy.points?.meleeKill ?? P.kill;
 
 // Points for one `hit:zombie` event: a plain hit, or instead a kill, a headshot kill or a melee kill.
-// Under One-Tap (`mods.oneTap`) every kill pays the plain kill points.
-export function pointsForHit({ killed, part, headshot, source } = {}, mods) {
-  if (!killed) return P.hit;
+// Under One-Tap (`mods.oneTap`) every kill pays the plain kill points. A round that went through
+// another zombie first (`pierced`) pays no hit points on this one; a kill pays as usual.
+export function pointsForHit({ killed, part, headshot, source, pierced } = {}, mods) {
+  if (!killed) return pierced ? 0 : P.hit;
   if (mods && mods.oneTap) return P.kill;
   if (source === 'melee') return MELEE_KILL;
   return part === 'head' || headshot ? P.headshotKill : P.kill;

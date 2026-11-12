@@ -567,6 +567,56 @@ export function createZombies(G, deps = {}) {
   const PICK = [];
   if (G.events && typeof G.events.on === 'function') G.events.on('hit:zombie', onHit);
 
+  // The ray (from the origin, unit dir) against a vertical cylinder of radius r from y0 to y0 + h at
+  // (cx, cz), all relative to the origin; an origin inside it, looking inward, hits at 0. The part is
+  // 'head' only when the ray passes through the body's head (its head hitbox's sphere), else 'torso'.
+  const CLOSE = 1.0;
+  function closeHit(body, cx, y0, cz, r, h, dx, dy, dz, ox, oy, oz, maxDist) {
+    const a = dx * dx + dz * dz;
+    const b = -(cx * dx + cz * dz), c = cx * cx + cz * cz - r * r;
+    let t;
+    if (c <= 0) { if (b >= 0) return null; t = 0; }
+    else {
+      if (a < 1e-9) return null;
+      const disc = b * b - a * c;
+      if (disc < 0) return null;
+      t = (-b - Math.sqrt(disc)) / a;
+      if (t < 0) return null;
+    }
+    let y = dy * t;
+    if (y > y0 + h && dy < 0) {
+      // above the side where it enters: through the top, if the ray comes down inside it
+      t = (y0 + h) / dy;
+      const qx = dx * t - cx, qz = dz * t - cz;
+      if (qx * qx + qz * qz > r * r) return null;
+      y = y0 + h;
+    }
+    if (t > maxDist || y < y0 || y > y0 + h) return null;
+    return { part: rayHitsHead(body, ox, oy, oz, dx, dy, dz) ? 'head' : 'torso', dist: t, pos: [ox + dx * t, oy + y, oz + dz * t] };
+  }
+  // Does the ray pass within the body's head hitbox (a sphere of its radius plus half its length
+  // round its centre, placed by its bone)? A severed head is not there.
+  function rayHitsHead(body, ox, oy, oz, dx, dy, dz) {
+    const hb = body && body.hitboxes;
+    if (!hb) return false;
+    for (let k = 0; k < hb.length; k++) {
+      const hx = hb[k];
+      if (hx.part !== 'head' || !hx.bone || !hx.bone.matrixWorld) continue;
+      if (body.pose && body.pose.hide && body.pose.hide[hx.index]) continue;
+      const e = hx.bone.matrixWorld.elements;
+      const sx = Math.hypot(e[0], e[1], e[2]) || 1, sy = Math.hypot(e[4], e[5], e[6]) || 1, sz = Math.hypot(e[8], e[9], e[10]) || 1;
+      const lx = hx.center[0], ly = hx.center[1], lz = hx.center[2];
+      const wx = (e[0] / sx) * lx + (e[4] / sy) * ly + (e[8] / sz) * lz + e[12] - ox;
+      const wy = (e[1] / sx) * lx + (e[5] / sy) * ly + (e[9] / sz) * lz + e[13] - oy;
+      const wz = (e[2] / sx) * lx + (e[6] / sy) * ly + (e[10] / sz) * lz + e[14] - oz;
+      const along = Math.max(0, wx * dx + wy * dy + wz * dz);
+      const qx = wx - dx * along, qy = wy - dy * along, qz = wz - dz * along;
+      const rr = hx.radius + (hx.halfHeight || 0);
+      if (qx * qx + qy * qy + qz * qz <= rr * rr) return true;
+    }
+    return false;
+  }
+
   // nearest hit on any live zombie's capsules
   function raycast(origin, dir, maxDist = Infinity) {
     const ox = origin.x ?? origin[0], oy = origin.y ?? origin[1], oz = origin.z ?? origin[2];
@@ -583,7 +633,14 @@ export function createZombies(G, deps = {}) {
       if (along < -R || along > maxDist + R) continue;
       const px = cx - dx * along, py = cy - dy * along, pz = cz - dz * along;
       if (px * px + py * py + pz * pz > R * R) continue;
-      const h = z.raycast(origin, dir, best ? best.dist : maxDist);
+      let h = z.raycast(origin, dir, best ? best.dist : maxDist);
+      // at arm's length the lunging body can wrap round the camera, and a ray that starts inside a
+      // body's capsules hits none of them: there the zombie's column is hit instead (standing: 0.3 m
+      // round its feet, 1.8 m tall; a crawler: 0.4 m round, 0.6 m tall)
+      if (!h && cx * cx + cz * cz < CLOSE * CLOSE) {
+        const low = recs[i].crawling;
+        h = closeHit(z, cx, crowd.y[i] - oy, cz, low ? 0.4 : 0.3, low ? 0.6 : 1.8, dx, dy, dz, ox, oy, oz, best ? best.dist : maxDist);
+      }
       if (h && (!best || h.dist < best.dist)) best = { id: recs[i].id, part: h.part, pos: h.pos, dist: h.dist };
     }
     return best;
@@ -696,7 +753,12 @@ export function createZombies(G, deps = {}) {
   const hooks = {
     attackStart(i, kind) {
       const a = slotAnim[i];
-      if (a) { TGT[0] = pNow[0]; TGT[1] = pNow[1] + 1.3; TGT[2] = pNow[2]; a.set(animState(a, kind === 1 ? 'slam' : 'attack'), OPTS); tgtX[i] = pNow[0]; tgtZ[i] = pNow[2]; }
+      if (a) {
+        // a swing is aimed where a moving player will be when the blow lands
+        const ahead = kind === 1 ? 0 : env.swing * (crowd.windup[i] || W.windup);
+        TGT[0] = pNow[0] + env.pvx * ahead; TGT[1] = pNow[1] + 1.3; TGT[2] = pNow[2] + env.pvz * ahead;
+        a.set(animState(a, kind === 1 ? 'slam' : 'attack'), OPTS); tgtX[i] = TGT[0]; tgtZ[i] = TGT[2];
+      }
       if (recs[i]) recs[i].state = 'attack';
       emit('zombie:attack', { id: recs[i].id, pos: [crowd.x[i], crowd.y[i] + 1.4, crowd.z[i]], type: recs[i].type, kind: kind === 1 ? 'slam' : 'swing' });
     },
@@ -741,6 +803,18 @@ export function createZombies(G, deps = {}) {
       return true;
     },
     boards(i) { const w = slotWin[i]; return w ? w.boards : 0; },
+    // does the line from agent i to the player cross the plane of its window inside the opening?
+    through(i, px, pz) {
+      const w = slotWin[i];
+      if (!w || !w.pos || !w.normal) return false;
+      const nx = w.normal[0], nz = w.normal[2];
+      const x = crowd.x[i], z = crowd.z[i];
+      const da = (x - w.pos[0]) * nx + (z - w.pos[2]) * nz, db = (px - w.pos[0]) * nx + (pz - w.pos[2]) * nz;
+      if (da === db) return Math.abs((x - w.pos[0]) * nz - (z - w.pos[2]) * nx) <= (w.w || 1) / 2;
+      const k = Math.min(1, Math.max(0, da / (da - db)));
+      const cx = x + (px - x) * k - w.pos[0], cz = z + (pz - z) * k - w.pos[2];
+      return Math.abs(cx * nz - cz * nx) <= (w.w || 1) / 2;
+    },
     tearStart(i) {
       const a = slotAnim[i];
       const w = slotWin[i];
@@ -766,8 +840,22 @@ export function createZombies(G, deps = {}) {
   const env = {
     t: 0, px: 0, py: 0, pz: 0, pAlive: true, field: null, tune: W, hooks, obstacles: null,
     lureField: null, lx: 0, ly: 0, lz: 0, tearEvery: (tuning.world && tuning.world.boards && tuning.world.boards.tearEvery) || 0.9,
-    climbMax: T.climbMax, breachBoards: T.breachBoards,
+    climbMax: T.climbMax, breachBoards: T.breachBoards, pvx: 0, pvz: 0, swing: 1,
   };
+  // the player's velocity (m/s) from its movement, smoothed over about 0.1 s; a jump of more than
+  // PV_MAX m/s (a respawn, a teleport) reads as standing still
+  const PV_MAX = 12;
+  let lastPx = NaN, lastPz = NaN;
+  function trackPlayer(pp, dt) {
+    let vx = (pp[0] - lastPx) / dt, vz = (pp[2] - lastPz) / dt;
+    if (!(dt > 0) || !(vx * vx + vz * vz <= PV_MAX * PV_MAX)) { vx = 0; vz = 0; }
+    const k = Math.min(1, dt / 0.1);
+    env.pvx += (vx - env.pvx) * k; env.pvz += (vz - env.pvz) * k;
+    lastPx = pp[0]; lastPz = pp[2];
+    // the swing's strength this round, less in the first rounds (tuning.zombies.swing)
+    const sw = T.swing, byRound = sw && sw.byRound && G.game ? sw.byRound[G.game.round] : undefined;
+    env.swing = Number.isFinite(byRound) ? byRound : sw && Number.isFinite(sw.strength) ? sw.strength : 1;
+  }
   let relocateT = 0;
 
   // A zombie cut off from the player (no path at all) is moved to a spawn point the player can reach
@@ -921,6 +1009,7 @@ export function createZombies(G, deps = {}) {
     pNow = pp;
     env.t = G.time ? now() : env.t + dt;
     env.px = pp[0]; env.py = Number.isFinite(pp[1]) ? pp[1] : 0; env.pz = pp[2];
+    trackPlayer(pp, dt);
     env.pAlive = !(G.player && G.player.alive === false);
     env.field = G.nav && G.nav.field && typeof G.nav.field.dir === 'function' ? G.nav.field : null;
     env.obstacles = getObstacles();

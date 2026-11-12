@@ -188,3 +188,7 @@
   #gs-ui.gs-touch .gs-corner.c-tc { top: calc(var(--st) + 280px); max-width: calc(100vw - 32px - var(--sl) - var(--sr)); }
   .gs-touch .gs-title .gs-cardwrap, .gs-touch .gs-pause .gs-cardwrap { display: none; }
 }
+
+/* the weapon list under the ammo readout stays short enough to clear the melee and throw buttons below it */
+.gs-touch .gs-slots { gap: 1px; }
+.gs-touch .gs-slot { font-size: 13px; padding: .1em .6em .1em 1em; }

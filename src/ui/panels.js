@@ -3,6 +3,7 @@
 // (tested); createPanels does the DOM, writing only values that changed.
 import { WEAPONS } from '../weapon/defs.js';
 import { tuning } from '../game/tuning.js';
+import { shortWeaponName, narrowScreen } from './format.js';
 
 export const RING_R = 22;
 const TOAST_LIFE = 2.5;
@@ -27,7 +28,7 @@ export function slotsView(weapon, out) {
     if (!sl || !sl.id) { if (pool && res[i]) pool[i] = res[i]; res[i] = null; continue; }
     const o = out ? (res[i] || (pool[i] && pool[i]) || { pips: { up: false, attach: 0 } }) : { pips: { up: false, attach: 0 } };
     if (!o.pips) o.pips = { up: false, attach: 0 };
-    o.id = sl.id; o.name = nameOf(sl.id); o.held = weapon.slot === i; o.upgraded = !!sl.upgraded;
+    o.id = sl.id; o.name = sl.upgraded && WEAPONS[sl.id] && WEAPONS[sl.id].upgraded ? WEAPONS[sl.id].upgraded.name : nameOf(sl.id); o.held = weapon.slot === i; o.upgraded = !!sl.upgraded;
     o.mag = Number.isFinite(sl.mag) ? sl.mag : null; o.reserve = Number.isFinite(sl.reserve) ? sl.reserve : null;
     o.pips.up = !!sl.upgraded; o.pips.attach = sl.attachments && typeof sl.attachments.size === 'number' ? sl.attachments.size : 0;
     res[i] = o;
@@ -136,7 +137,8 @@ export function createPanels(G, { addPanel, overlay, staged = false, query = new
     for (let i = 0; i < 2; i++) {
       const it = v[i] || null, c = slotCache[i], d = slotEls[i];
       if (!it) { if (c.id !== null) { c.id = null; d.el.hidden = true; } continue; }
-      if (c.id !== it.id || c.up !== it.upgraded) { c.id = it.id; c.up = it.upgraded; d.name.textContent = it.name; d.el.hidden = false; }
+      const short = narrowScreen(G.ui && G.ui.touch);
+      if (c.id !== it.id || c.up !== it.upgraded || c.short !== short) { c.id = it.id; c.up = it.upgraded; c.short = short; d.name.textContent = short ? shortWeaponName(it.name) : it.name; d.el.hidden = false; }
       if (c.held !== it.held) { c.held = it.held; d.el.classList.toggle('held', it.held); }
       if (c.mag !== it.mag || c.res !== it.reserve) { c.mag = it.mag; c.res = it.reserve; d.ammo.textContent = it.mag === null ? '' : `${it.mag} / ${it.reserve === null ? '—' : it.reserve}`; }
       const sig = (it.pips.up ? 8 : 0) + it.pips.attach;

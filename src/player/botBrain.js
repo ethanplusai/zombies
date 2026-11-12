@@ -28,6 +28,8 @@
 //   bot.brain            { mode: 'fight'|'resupply'|'errand', shots, buys, target, errand }
 //   brain.errandTo(id, {hold})   scripts: go to interactable `id` and use it (or hold interact there
 //                                for `hold` seconds whatever it is); brain.errand is null when done
+import { crateCostOf } from '../game/purchases.js';
+
 const FIRE_EVERY = 0.2; // s between trigger pulls (the pistol's own cooldown is 0.15): lets the bloom settle
 const SIGHT = 16; // m: do not shoot at anything farther (walking, even aimed fire scatters about a degree)
 const TOO_CLOSE = 5; // m: a zombie this near and it moves off
@@ -96,6 +98,8 @@ export function createBotBrain(G, player) {
   const game = () => (G.game && !G.game.stub ? G.game : null);
   const ground = (it) => !!it && !!it.pos && !((it.pos[1] ?? it.pos.y) > UPPER);
   const usable = (it) => !!it && (typeof it.enabled !== 'function' || it.enabled());
+  // standing at `it`: by id, since the game may offer a live view of an interactable (the ammo crate)
+  const at = (g, it) => !!(g && g.focus && it && g.focus.id === it.id);
   const P = (it) => (Array.isArray(it.pos) ? it.pos : [it.pos.x, it.pos.y, it.pos.z]);
 
   // zones reachable from the player's through open doors
@@ -127,15 +131,18 @@ export function createBotBrain(G, player) {
     return n;
   }
 
-  // Where ammo for the held weapon is sold: the store for the pistol, its wall otherwise.
+  // Where ammo for the held weapon is sold: its own wall if it has one on the ground floor, else the
+  // ammo crate (which sells for whatever is held).
   function ammoSource() {
     const w = G.weapon;
     const id = w && w.id;
+    if (!id) return null;
+    let crate = null;
     for (const it of list()) {
-      if (it.kind === 'wallAmmo' && id === 'pistol') return it;
       if (it.kind === 'wallWeapon' && it.weapon === id && ground(it)) return it;
+      if (!crate && it.kind === 'wallAmmo' && (!it.weapon || it.weapon === id)) crate = it;
     }
-    return null;
+    return crate;
   }
 
   // Where to stand to use an interactable: the walkable ground nearest to it (it hangs on a wall).
@@ -399,9 +406,12 @@ export function createBotBrain(G, player) {
     const holdFor = opts.hold > 0 ? opts.hold : 0;
     let held = 0;
     const act = holdFor ? 'hold' : it.kind === 'search' || it.kind === 'boards' ? 'hold' : it.kind === 'box' ? 'box' : 'press';
+    // the ammo crate never stops being usable: done once a press there has been answered (bought or refused)
+    const since = g ? g.lastUse : null;
     const done = holdFor ? () => held >= holdFor
       : it.kind === 'search' ? () => !!(g && g.loot.searched.has(it.search))
-        : () => !usable(it);
+        : it.kind === 'wallAmmo' ? () => !!(g && g.lastUse && g.lastUse !== since && g.lastUse.id === it.id)
+          : () => !usable(it);
     brain.errand = { it, act, rolled: false, scripted: true, t: 0, tick: (dt) => { held += dt; }, holdFor, done };
     skip.delete(id);
     return true;
@@ -417,22 +427,22 @@ export function createBotBrain(G, player) {
     const d = Math.hypot(ep[0] - player.pos[0], ep[2] - player.pos[2]);
     if (!(d < e.best - 0.3)) e.stall = (e.stall || 0) + dt; else { e.best = d; e.stall = 0; }
     if (e.best === undefined) e.best = d;
-    if (e.stall > 2 && g && g.focus !== e.it) { bot.sidestep = 0.8; e.stall = 0; e.best = d; }
+    if (e.stall > 2 && g && !at(g, e.it)) { bot.sidestep = 0.8; e.stall = 0; e.best = d; }
     if (e.act === 'box' && g) {
       const box = g.box;
       if (box.state === 'rolling') e.rolled = true;
       if (e.rolled && box.state !== 'rolling' && box.state !== 'offering') { brain.errand = null; return; }
-      if (e.rolled && box.state === 'offering' && g.focus !== e.it) { approach(bot, e.it); return; }
+      if (e.rolled && box.state === 'offering' && !at(g, e.it)) { approach(bot, e.it); return; }
     } else if (e.done()) { brain.errand = null; return; }
     if (e.t > ERRAND_LIMIT) { skip.set(e.it.id, clock + SKIP_FOR); brain.errand = null; return; }
-    if (e.scripted && e.holdFor && g && g.focus !== e.it && near(e.it, 1.0)) {
+    if (e.scripted && e.holdFor && g && !at(g, e.it) && near(e.it, 1.0)) {
       // a forced hold on something that offers nothing any more: stand at it and hold
       bot.goal = [player.pos[0], player.pos[2]];
       if (!g.focus || g.focus.hold > 0) input.synthNext('interact'); // never a press on something else
       e.tick(dt);
       return;
     }
-    if (!g || g.focus !== e.it) { approach(bot, e.it); return; }
+    if (!at(g, e.it)) { approach(bot, e.it); return; }
     bot.goal = [player.pos[0], player.pos[2]];
     if (e.act === 'hold') {
       input.synthNext('interact'); // held every frame: game.update reads it before the bot runs
@@ -477,10 +487,12 @@ export function createBotBrain(G, player) {
     // a bot that cannot die (god) does not leave an errand for ammo until it is nearly out
     const god = !!(G.params && G.params.god);
     const urgent = !brain.errand || !god || w.ammo.reserve <= w.ammo.mag;
-    let canBuyAmmo = !!buy && low && urgent && points >= (buy.cost ?? 0) && usable(buy);
+    // the crate's price is the held gun's (its own `cost` is the pistol's)
+    const buyCost = !buy ? 0 : buy.kind === 'wallAmmo' ? crateCostOf(buy, w) : buy.cost ?? 0;
+    let canBuyAmmo = !!buy && low && urgent && points >= buyCost && usable(buy);
     const survive = !god;
     const crowded = survive && aliveCount() > CROWD;
-    if (survive && buy && points >= (buy.cost ?? 0) && usable(buy)) {
+    if (survive && buy && points >= buyCost && usable(buy)) {
       // below one magazine with a wall within reach: buy now, zombies or not; above it, top up only
       // when nothing is within KEEP m and the wall is not through a door into a crowd
       reachable();

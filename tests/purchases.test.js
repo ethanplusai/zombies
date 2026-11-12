@@ -2,6 +2,8 @@
 // bench, the machines, board repairs).
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { econG, memoryStorage } from './fakes/econ.js';
+import { crateAmmoPrice } from '../src/game/purchases.js';
+import { promptString, formatPoints } from '../src/ui/format.js';
 
 let saved;
 beforeEach(() => { saved = globalThis.window; globalThis.window = memoryStorage(); });
@@ -41,16 +43,19 @@ describe('wall weapons', () => {
     expect(g.events('buy').at(-1)).toEqual({ item: 'wallAmmo', cost: 400, id: 'wall-hollis12' });
   });
 
-  it('ammo for an upgraded weapon costs 4500 and fills it', () => {
+  it('ammo for an upgraded weapon at its wall costs what the crate asks (3x stock: 1200 for the pump) and fills it', () => {
     const g = econG({ points: 1000, params: {} });
     use(g, 'wall-hollis12');
     g.G.weapon.upgrade('pump');
     g.G.weapon.slots[1].reserve = 0;
-    g.game.economy.points = 4499;
-    expect(g.find('wall-hollis12').cost).toBe(4500);
+    g.game.economy.points = 1199;
+    expect(g.find('wall-hollis12').cost).toBe(1200);
+    expect(g.find('wall-hollis12').cost).toBe(crateAmmoPrice('pump', true));
+    expect(g.find('wall-hollis12').label).toMatch(/ammo/i);
     expect(use(g, 'wall-hollis12')).toEqual({ ok: false, reason: 'points' });
-    g.game.economy.points = 4500;
+    g.game.economy.points = 1200;
     expect(use(g, 'wall-hollis12').ok).toBe(true);
+    expect(g.game.points).toBe(0);
     expect(g.G.weapon.slots[1].reserve).toBe(g.G.weapon.statsFor(g.G.weapon.slots[1]).maxReserve);
   });
 
@@ -62,6 +67,26 @@ describe('wall weapons', () => {
     expect(g.game.points).toBe(50);
     expect(use(g, 'ammo-store')).toEqual({ ok: false, reason: 'full' });
   });
+});
+
+describe('upgraded ammo costs the same at a wall and at the crate', () => {
+  for (const [wall, id] of [['wall-hollis12', 'pump'], ['wall-pike45', 'smg'], ['wall-calder556', 'rifle'], ['wall-brandt12', 'autoShotgun']]) {
+    it(`${id}: wall price == crate price, stock and upgraded; the wall prompt quotes it`, () => {
+      const g = econG({ points: 20000, params: { give: [id] } });
+      const w = g.find(wall);
+      if (!w) return; // (a wall this layout does not place)
+      const crate = g.find('ammo-store');
+      g.G.player.pos = [crate.pos[0] - 0.8, 0, crate.pos[2]];
+      g.step();
+      expect(w.cost).toBe(g.game.focus.cost);
+      g.G.weapon.upgrade(id);
+      g.step();
+      expect(w.cost).toBe(crateAmmoPrice(id, true));
+      expect(w.cost).toBe(g.game.focus.cost);
+      expect(w.cost).toBeLessThanOrEqual(3000);
+      expect(promptString(w).endsWith(`ammo · ${formatPoints(w.cost)}`)).toBe(true);
+    });
+  }
 });
 
 describe('doors and power', () => {
