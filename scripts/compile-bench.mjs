@@ -9,7 +9,7 @@ const which = opt('browser', 'chromium'); const name = opt('name', which); const
 const dir = join(import.meta.dirname);
 const srv = createServer((req, res) => { try { const f = req.url.split('?')[0].replace(/^\//, '') || 'compile-bench.html'; res.setHeader('content-type', f.endsWith('.json') ? 'application/json' : 'text/html'); res.end(readFileSync(join(dir, f))); } catch { res.statusCode = 404; res.end(); } });
 await new Promise((r) => srv.listen(0, '127.0.0.1', r));
-const url = `http://127.0.0.1:${srv.address().port}/compile-bench.html`;
+const url = `http://127.0.0.1:${srv.address().port}/compile-bench.html?f=${opt('file', 'shaders-boot.json')}`;
 const browser = which === 'firefox' ? await firefox.launch({ headless: true }) : await chromium.launch({ channel: 'chromium', headless: true, args });
 const page = await browser.newPage();
 await page.goto(url);

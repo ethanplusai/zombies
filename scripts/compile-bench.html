@@ -3,7 +3,7 @@
 // driver took. window.__bench is the result; window.__benchDone is set at the end.
 window.__bench = { programs: [], renderer: '', total: 0 };
 (async () => {
-  const data = await (await fetch('shaders.json')).json();
+  const data = await (await fetch(new URLSearchParams(location.search).get('f') || 'shaders-boot.json')).json();
   const gl = document.createElement('canvas').getContext('webgl2');
   const dbg = gl.getExtension('WEBGL_debug_renderer_info');
   window.__bench.renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
