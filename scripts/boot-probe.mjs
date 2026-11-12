@@ -61,6 +61,8 @@ const info = await Promise.race([
       stats: window.__stats ? window.__stats() : null,
       frameMs: frames.length ? { first10: frames.slice(0, 10), median: frames.slice().sort((a, b) => a - b)[frames.length >> 1], worst: Math.max(...frames) } : null,
       errors: (window.__errors || []).map((s) => String(s).slice(0, 2500)),
+      details: typeof window.__bootDetails === 'function' ? String(window.__bootDetails()).slice(0, 6000) : null,
+      stalls: window.__bootStalls || null,
     };
   }),
   new Promise((r) => setTimeout(() => r({ evalHung: true }), 120000)),

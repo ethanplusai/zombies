@@ -18,10 +18,6 @@ jobs:
         shell: bash
         run: node scripts/boot-probe.mjs "file:///$(pwd -W)/probe-build/index.html" --name fixed-chromium-d3d11 --wait 600 --args "--use-gl=angle --use-angle=d3d11 --ignore-gpu-blocklist --enable-gpu --allow-file-access-from-files"
         continue-on-error: true
-      - name: fixed build, Firefox
-        shell: bash
-        run: node scripts/boot-probe.mjs "file:///$(pwd -W)/probe-build/index.html" --browser firefox --name fixed-firefox --wait 600
-        continue-on-error: true
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: probe-out, path: probe-out }
