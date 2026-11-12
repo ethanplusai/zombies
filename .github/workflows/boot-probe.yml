@@ -1,0 +1,28 @@
+name: boot-probe
+# Boots the game on Windows (Direct3D through ANGLE) and records timings and errors.
+on:
+  workflow_dispatch:
+  push:
+    branches: [boot-probe]
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npx playwright install chromium firefox
+      - name: Chromium, Direct3D 11
+        run: node scripts/boot-probe.mjs https://zombies.ethanplus.ai/ --name chromium-d3d11 --wait 600 --args "--use-gl=angle --use-angle=d3d11 --ignore-gpu-blocklist --enable-gpu"
+        continue-on-error: true
+      - name: Chromium, default
+        run: node scripts/boot-probe.mjs https://zombies.ethanplus.ai/ --name chromium-default --wait 600
+        continue-on-error: true
+      - name: Firefox
+        run: node scripts/boot-probe.mjs https://zombies.ethanplus.ai/ --browser firefox --name firefox --wait 600
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: probe-out, path: probe-out }
