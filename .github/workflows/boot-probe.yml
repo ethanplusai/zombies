@@ -7,7 +7,7 @@ on:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,7 +16,11 @@ jobs:
       - run: npx playwright install chromium firefox
       - name: fixed build, Chromium Direct3D 11
         shell: bash
-        run: node scripts/boot-probe.mjs "file:///$(pwd -W)/probe-build/index.html" --name fixed-chromium-d3d11 --wait 600 --args "--use-gl=angle --use-angle=d3d11 --ignore-gpu-blocklist --enable-gpu --allow-file-access-from-files"
+        run: node scripts/boot-probe.mjs "file:///$(pwd -W)/probe-build/index.html" --name fixed-chromium-d3d11 --wait 900 --args "--use-gl=angle --use-angle=d3d11 --ignore-gpu-blocklist --enable-gpu --allow-file-access-from-files"
+        continue-on-error: true
+      - name: fixed build, Firefox
+        shell: bash
+        run: node scripts/boot-probe.mjs "file:///$(pwd -W)/probe-build/index.html" --browser firefox --name fixed-firefox --wait 900
         continue-on-error: true
       - uses: actions/upload-artifact@v4
         if: always()

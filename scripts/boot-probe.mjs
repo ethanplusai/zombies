@@ -18,11 +18,17 @@ const browser = which === 'firefox'
   : await chromium.launch({ channel: 'chromium', headless: true, args });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const logs = [];
-page.on('console', (m) => { if (m.type() !== 'log' && m.type() !== 'info') logs.push(`${m.type()}: ${m.text().slice(0, 1500)}`); });
+// the page writes its boot details to console.info at ready and every 30 s once it is slow
+// (core/bootwatch.js): kept here so they arrive even when page.evaluate hangs
+let lastDetails = null;
+page.on('console', (m) => {
+  if (m.type() === 'info' && m.text().startsWith('[boot details]')) { lastDetails = { at: Number(((Date.now() - t0) / 1000).toFixed(1)), text: m.text() }; return; }
+  if (m.type() !== 'log' && m.type() !== 'info') logs.push(`${m.type()}: ${m.text().slice(0, 1500)}`);
+});
 page.on('pageerror', (e) => logs.push(`pageerror: ${String(e.message).slice(0, 600)}`));
 page.on('crash', () => logs.push('PAGE CRASHED'));
 
-const t0 = Date.now();
+const t0 = Date.now(); // console messages arrive only after goto below, so the handler above may use it
 const stages = [];
 let last = '';
 let ready = false;
@@ -61,8 +67,11 @@ const info = await Promise.race([
       stats: window.__stats ? window.__stats() : null,
       frameMs: frames.length ? { first10: frames.slice(0, 10), median: frames.slice().sort((a, b) => a - b)[frames.length >> 1], worst: Math.max(...frames) } : null,
       errors: (window.__errors || []).map((s) => String(s).slice(0, 2500)),
-      details: typeof window.__bootDetails === 'function' ? String(window.__bootDetails()).slice(0, 6000) : null,
-      stalls: window.__bootStalls || null,
+      // seconds per boot stage and the longest stalls (core/bootwatch.js), the effects atlas timings (fx/atlas.js)
+      bootStalls: window.__bootStalls || null,
+      bootDetails: typeof window.__bootDetails === 'function' ? window.__bootDetails() : null,
+      fxBake: window.__fxBake || null,
+      warm: window.__warmRuns || null,
     };
   }),
   new Promise((r) => setTimeout(() => r({ evalHung: true }), 120000)),
@@ -70,7 +79,7 @@ const info = await Promise.race([
 
 mkdirSync('probe-out', { recursive: true });
 await Promise.race([page.screenshot({ path: `probe-out/${name}.png` }), new Promise((r) => setTimeout(r, 20000))]).catch(() => {});
-const out = { name, url, args, ready, readyAt: Number(readyAt.toFixed(1)), stages, info, logs: logs.slice(0, 80) };
+const out = { name, url, args, ready, readyAt: Number(readyAt.toFixed(1)), stages, info, lastDetails, logs: logs.slice(0, 80) };
 writeFileSync(`probe-out/${name}.json`, JSON.stringify(out, null, 1));
 console.log(JSON.stringify(out, null, 1));
 await Promise.race([browser.close(), new Promise((r) => setTimeout(r, 15000))]);
