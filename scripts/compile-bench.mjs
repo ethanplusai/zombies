@@ -14,7 +14,7 @@ const browser = which === 'firefox' ? await firefox.launch({ headless: true }) :
 const page = await browser.newPage();
 await page.goto(url);
 const t0 = Date.now();
-while (Date.now() - t0 < 25 * 60 * 1000) {
+while (Date.now() - t0 < 45 * 60 * 1000) {
   const s = await Promise.race([page.evaluate(() => ({ done: !!window.__benchDone, n: window.__bench.programs.length })), new Promise((r) => setTimeout(() => r(null), 10000))]).catch(() => null);
   if (s && s.done) break;
   await new Promise((r) => setTimeout(r, 2000));
@@ -24,5 +24,5 @@ mkdirSync('probe-out', { recursive: true });
 writeFileSync(`probe-out/compile-${name}.json`, JSON.stringify(bench, null, 1));
 const ps = (bench.programs || []).slice().sort((a, b) => b.ms - a.ms);
 console.log(name, bench.renderer, 'tier', bench.tier, 'programs', ps.length, 'total s', ((bench.total || 0) / 1000).toFixed(1), 'failed', ps.filter((p) => !p.ok).length, bench.error || '');
-for (const p of ps.slice(0, 15)) console.log(`  ${p.ms} ms  ${p.chars} chars  ${p.name}  ${p.ok ? '' : 'FAILED ' + p.log.slice(0, 300)}`);
+for (const p of ps.slice(0, 60)) console.log(`  ${p.ms} ms  ${p.chars} chars  ${p.name}  ${p.ok ? '' : 'FAILED ' + p.log.slice(0, 300)}`);
 await Promise.race([browser.close(), new Promise((r) => setTimeout(r, 10000))]); srv.close(); process.exit(0);
