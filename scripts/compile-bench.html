@@ -1,0 +1,27 @@
+<!doctype html><meta charset="utf-8"><title>compile bench</title><body><script>
+// Compiles and links each shader program in the list, one at a time, and records how long the
+// driver took. window.__bench is the result; window.__benchDone is set at the end.
+window.__bench = { programs: [], renderer: '', total: 0 };
+(async () => {
+  const data = await (await fetch('shaders.json')).json();
+  const gl = document.createElement('canvas').getContext('webgl2');
+  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  window.__bench.renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+  window.__bench.tier = data.tier;
+  const salt = Math.floor(performance.timeOrigin) % 100000; // a fresh source each run, so no cached binary is reused
+  let i = 0;
+  for (const pr of data.programs) {
+    const t0 = performance.now();
+    const mk = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src + `\nfloat bench_${salt}_${i}(){return ${i}.5;}\n`); gl.compileShader(s); return s; };
+    const vs = mk(gl.VERTEX_SHADER, pr.vs), fs = mk(gl.FRAGMENT_SHADER, pr.fs);
+    const p = gl.createProgram(); gl.attachShader(p, vs); gl.attachShader(p, fs); gl.linkProgram(p);
+    const ok = gl.getProgramParameter(p, gl.LINK_STATUS);
+    const ms = performance.now() - t0;
+    window.__bench.programs.push({ i, name: pr.name, chars: pr.vs.length + pr.fs.length, ms: Math.round(ms), ok, log: ok ? '' : ((gl.getProgramInfoLog(p) || '') + ' | ' + (gl.getShaderInfoLog(fs) || '') + ' | ' + (gl.getShaderInfoLog(vs) || '')).slice(0, 1200) });
+    window.__bench.total += ms; i++;
+    document.title = `${i}/${data.programs.length}`;
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  window.__benchDone = true;
+})().catch((e) => { window.__bench.error = String(e && e.stack || e); window.__benchDone = true; });
+</script></body>

@@ -14,14 +14,14 @@ jobs:
         with: { node-version: 22 }
       - run: npm ci
       - run: npx playwright install chromium firefox
-      - name: Chromium, Direct3D 11
-        run: node scripts/boot-probe.mjs https://zombies.ethanplus.ai/ --name chromium-d3d11 --wait 600 --args "--use-gl=angle --use-angle=d3d11 --ignore-gpu-blocklist --enable-gpu"
+      - name: shader compile time, Chromium Direct3D 11
+        run: node scripts/compile-bench.mjs --name chromium-d3d11 --args "--use-gl=angle --use-angle=d3d11 --ignore-gpu-blocklist --enable-gpu"
         continue-on-error: true
-      - name: Chromium, default
-        run: node scripts/boot-probe.mjs https://zombies.ethanplus.ai/ --name chromium-default --wait 600
+      - name: shader compile time, Firefox
+        run: node scripts/compile-bench.mjs --browser firefox --name firefox
         continue-on-error: true
-      - name: Firefox
-        run: node scripts/boot-probe.mjs https://zombies.ethanplus.ai/ --browser firefox --name firefox --wait 600
+      - name: shader compile time, Chromium software GL (no Direct3D)
+        run: node scripts/compile-bench.mjs --name chromium-swiftshader --args "--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader"
         continue-on-error: true
       - uses: actions/upload-artifact@v4
         if: always()
