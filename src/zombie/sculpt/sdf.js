@@ -220,7 +220,9 @@ export const SDF_GLSL = /* glsl */ `
 uniform highp sampler2D tPrims;
 uniform int uPrimN;
 float sdSmin(float a, float b, float k) { if (k <= 0.0) return min(a, b); float h = max(k - abs(a - b), 0.0) / k; return min(a, b) - h * h * k * 0.25; }
+// One exit with the result always assigned (Direct3D's compiler warns that early returns may leave it unset).
 float sdPrim(int i, vec4 t0, vec3 p) {
+  float res = 0.0;
   vec4 t1 = texelFetch(tPrims, ivec2(1, i), 0), t2 = texelFetch(tPrims, ivec2(2, i), 0);
   if (t0.x > 0.5 && t0.x < 1.5) {
     vec3 a = t1.xyz, ba = t2.xyz - a; float r1 = t1.w, r2 = t2.w;
@@ -228,20 +230,23 @@ float sdPrim(int i, vec4 t0, vec3 p) {
     vec3 pa = p - a; float y = dot(pa, ba), z = y - l2;
     vec3 q = pa * l2 - ba * y; float x2 = dot(q, q), y2 = y * y * l2, z2 = z * z * l2;
     float k = sign(rr) * rr * rr * x2;
-    if (sign(z) * a2 * z2 > k) return sqrt(x2 + z2) * il2 - r2;
-    if (sign(y) * a2 * y2 < k) return sqrt(x2 + y2) * il2 - r1;
-    return (sqrt(x2 * a2 * il2) + y * rr) * il2 - r1;
+    if (sign(z) * a2 * z2 > k) res = sqrt(x2 + z2) * il2 - r2;
+    else if (sign(y) * a2 * y2 < k) res = sqrt(x2 + y2) * il2 - r1;
+    else res = (sqrt(x2 * a2 * il2) + y * rr) * il2 - r1;
+  } else {
+    vec3 r0 = texelFetch(tPrims, ivec2(3, i), 0).xyz, r1v = texelFetch(tPrims, ivec2(4, i), 0).xyz;
+    vec3 d = p - t1.xyz;
+    vec3 q = vec3(dot(r0, d), dot(r1v, d), dot(cross(r0, r1v), d));
+    if (t0.x < 0.5) {
+      vec3 u = q / t2.xyz; float k0 = length(u);
+      if (k0 < 1e-9) res = -min(t2.x, min(t2.y, t2.z));
+      else res = k0 * (k0 - 1.0) / length(u / t2.xyz);
+    } else {
+      vec3 e = abs(q) - t2.xyz;
+      res = length(max(e, 0.0)) + min(max(e.x, max(e.y, e.z)), 0.0) - t1.w;
+    }
   }
-  vec3 r0 = texelFetch(tPrims, ivec2(3, i), 0).xyz, r1v = texelFetch(tPrims, ivec2(4, i), 0).xyz;
-  vec3 d = p - t1.xyz;
-  vec3 q = vec3(dot(r0, d), dot(r1v, d), dot(cross(r0, r1v), d));
-  if (t0.x < 0.5) {
-    vec3 u = q / t2.xyz; float k0 = length(u);
-    if (k0 < 1e-9) return -min(t2.x, min(t2.y, t2.z));
-    return k0 * (k0 - 1.0) / length(u / t2.xyz);
-  }
-  vec3 e = abs(q) - t2.xyz;
-  return length(max(e, 0.0)) + min(max(e.x, max(e.y, e.z)), 0.0) - t1.w;
+  return res;
 }
 float sdFigure(vec3 p) {
   p.x = abs(p.x);

@@ -6,6 +6,7 @@ import {
   PlaneGeometry, BoxGeometry, PointLight, HemisphereLight, Color, Group,
 } from 'three';
 import { internalSize } from './quality.js';
+import { installShaderErrorReport } from './warm.js';
 
 const RESTORE_WAIT_MS = 3000; // how long a lost context gets to come back before the reload message
 
@@ -53,6 +54,7 @@ export function createRenderer(G) {
   renderer.info.autoReset = false; // the post chain resets once per frame so __stats() counts the whole frame
   renderer.setClearColor(0x000000, 1);
   renderer.setPixelRatio(1);
+  installShaderErrorReport(renderer);
   host.appendChild(canvas);
 
   // Context loss (a phone sent to the background, a driver reset). The browser may hand the context

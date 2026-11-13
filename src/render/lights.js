@@ -746,6 +746,9 @@ export function createLights(G) {
     },
     // Skip the cross-fades on the next update (respawn, cutscene cut). Camera jumps over 8 m do it automatically.
     snap() { snap = true; },
+    // Apply the tier's light budget now instead of on the next update (the light counts are part of
+    // every shader, so the boot does this before compiling them for a new tier).
+    syncTier() { syncBudget(); },
     // debug: which fixture each slot holds and how far in it is
     debug() {
       const row = (s) => (s.fixture ? `${s.fixture.id}:${s.fade.toFixed(2)}` : '-');

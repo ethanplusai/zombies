@@ -428,6 +428,9 @@ export function createVolumetrics(G) {
 
   return {
     name: 'vol', uniforms, beam: BEAM,
+    // the shader warm-up's dry frame (render/warm.js) draws nothing, so the shadow tiles it marked
+    // ready are empty: they are drawn again, one a frame, as on the first frames
+    afterDryFrame() { if (atlas) atlas.invalidate(); },
     init(post) {
       noise = buildNoise(G.rng.fork('volumetrics'));
       atlas = createShadowAtlas(G);

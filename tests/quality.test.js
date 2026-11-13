@@ -263,6 +263,23 @@ describe('createQuality', () => {
     await q.autoSelect(); // decided: not measured twice
     expect(e.runs).toBe(1);
   });
+  it('a software renderer: no benchmark, mobile for this visit, nothing stored', async () => {
+    const e = env({ ms: 5 });
+    const q = createQuality(makeG(), e);
+    expect(await q.autoSelect({ software: true, settle: false })).toBe('mobile');
+    expect(e.runs).toBe(0);
+    expect(e.stored()).toBe(null);
+    expect(q.tier).toBe('mobile');
+  });
+  it('settle: false leaves the settle frame to the caller', async () => {
+    let settled = 0;
+    const e = { ...env({ ms: 5 }), settle: () => { settled++; } };
+    const q = createQuality(makeG(), e);
+    await q.autoSelect({ settle: false });
+    expect(settled).toBe(0);
+    q.settle();
+    expect(settled).toBe(1);
+  });
   it('a touch device at 30 ms gets mobile', async () => {
     const e = env({ ms: 30 });
     const q = createQuality(makeG({}, { touch: true }), e);

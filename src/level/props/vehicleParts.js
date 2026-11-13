@@ -18,6 +18,7 @@ import {
 } from 'three';
 import { M, box, cyl, lathe } from '../build.js';
 import { createCarMats } from '../../mats/carPaint.js';
+import { canCompileInParallel } from '../../render/warm.js';
 
 const _v = new Vector3(), _n = new Vector3(), _m3 = new Matrix3(), _m4 = new Matrix4(), _m4b = new Matrix4();
 const WHITE = [1, 1, 1], ZERO4 = [0, 0, 0, 0];
@@ -784,7 +785,7 @@ export function installVehicles(G) {
   if (typeof window !== 'undefined') window.__vehicles = layer;
   try {
     const target = G.post && G.post.targets && G.post.targets.scene;
-    if (target && G.renderer.compileAsync) {
+    if (target && G.renderer.compileAsync && canCompileInParallel(G.renderer)) {
       const prev = G.renderer.getRenderTarget();
       G.renderer.setRenderTarget(target);
       G.renderer.compileAsync(root, G.camera, G.scene).catch(() => {});

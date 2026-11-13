@@ -7,6 +7,7 @@ import { createRng } from '../core/rng.js';
 import { B, PARTS, makeProportions, createSkeleton, solveFK, setBias } from './skeleton.js';
 import { buildWardrobe, bakeAtlasOf } from './bodyGeo.js';
 import { bakeCharacter, bakeGarments } from './sculpt/bake.js';
+import { isSoftwareRenderer, rendererName } from '../render/software.js';
 import { createHairTexture } from './hair.js';
 import { makeLook, pickVariant, pickSex, pickBuild, VARIANTS } from './variants.js';
 import { createZombieMaterials } from './zmats.js';
@@ -20,7 +21,7 @@ const wardrobes = new Map();
 let maps = null;
 const live = new Set();          // the materials' uniforms of every zombie alive (re-pointed when the maps are rebaked)
 const progressFns = [];
-export const stats = { wardrobeMs: 0, bakeMs: 0, wardrobes: 0 };
+export const stats = { wardrobeMs: 0, bakeMs: 0, wardrobes: 0, stepMs: [] }; // stepMs: each bake step's main-thread time
 if (typeof window !== 'undefined') window.__zstats = stats;      // load cost, for the harness
 
 // boot-progress hook: fn(fraction 0..1, label) while the character maps bake
@@ -57,6 +58,8 @@ function bodyMaps(G) {
   const skin = bakeCharacter(G, base.fig, bakeAtlasOf(base, size), { onProgress: report });
   const cloth = bakeGarments(G, base.garments.pieces, size);
   maps = { normalAo: skin.normalAo, albedoRough: skin.albedoRough, thicknessCavity: skin.thicknessCavity, cloth: cloth.texture, hair: createHairTexture(size <= 1024 ? 2 : 1), jobs: [skin, cloth], size };
+  // the maps for the harness (not enumerable: __zstats stays plain data)
+  Object.defineProperty(stats, 'maps', { value: maps, configurable: true, enumerable: false, writable: true });
   // A restored GL context gives the bake targets back empty: bake again, at once, and point every
   // live zombie at the new maps.
   if (G.events && G.events.on) G.events.on('renderer:restored', () => {
@@ -72,13 +75,42 @@ function bodyMaps(G) {
   const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
   const done = () => { stats.bakeMs = (typeof performance !== 'undefined' ? performance.now() : 0) - t0; };
   if (now) { skin.finish(); cloth.finish(); done(); } else {
+    // One step at a time on the GPU as well: the next waits until a fence says the last one has
+    // been drawn. Each step is one large draw; queued up unchecked they would make the next thing that
+    // waits for the GPU (any first draw, any read-back) wait for all of them.
+    const gl = G.renderer && G.renderer.getContext ? G.renderer.getContext() : null;
+    const fences = !!(gl && typeof gl.fenceSync === 'function');
+    let fence = null; let fencedAt = 0; let fencedJob = null;
+    const SLOW_STEP_MS = 120; // a step the GPU took longer than this over: the next ones are cut smaller
+    const FAST_STEP_MS = 40; // and under this, larger again
+    // Start in small pieces (smaller still on a software renderer) and grow while the GPU keeps up:
+    // the first region is the largest, and a GPU still drawing it holds up whatever waits on it next.
+    skin.bands = isSoftwareRenderer(rendererName(gl)) ? 32 : 8;
+    const gpuBusy = () => {
+      if (!fence) return false;
+      if (gl.isContextLost()) { fence = null; return false; }
+      if (gl.getSyncParameter(fence, gl.SYNC_STATUS) === gl.UNSIGNALED) return true; // a cached status: does not wait (a fence from a lost context reads null: done)
+      gl.deleteSync(fence); fence = null;
+      const took = performance.now() - fencedAt;
+      if (fencedJob === skin) {
+        if (took > SLOW_STEP_MS) skin.bands = Math.min(64, (skin.bands || 1) * 2);
+        else if (took < FAST_STEP_MS) skin.bands = Math.max(1, Math.floor((skin.bands || 1) / 2));
+      } else if (fencedJob === cloth && took > SLOW_STEP_MS) cloth.perStep = Math.max(1, Math.floor((cloth.perStep || 12) / 2));
+      return false;
+    };
     const tick = () => {
       const j = !skin.done ? skin : !cloth.done ? cloth : null;
       if (!j) { done(); return; }
+      if (gpuBusy()) { requestAnimationFrame(tick); return; }
+      const a = performance.now();
       j.step();
+      stats.stepMs.push(Math.round(performance.now() - a));
+      if (fences && !gl.isContextLost()) { fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); fencedAt = performance.now(); fencedJob = j; }
       requestAnimationFrame(tick);
     };
-    requestAnimationFrame(tick);
+    // the bake shaders are compiled off the main thread first where the browser can (sculpt/bake.js)
+    const ready = (j) => (j.prepare ? j.prepare() : Promise.resolve());
+    Promise.all([ready(skin), ready(cloth)]).then(() => requestAnimationFrame(tick), () => requestAnimationFrame(tick));
   }
   return maps;
 }

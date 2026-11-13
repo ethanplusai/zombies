@@ -195,6 +195,9 @@ export function createReflection(G) {
       });
     },
     resize(w, h) { width = w; height = h; scale = 0; },
+    // the shader warm-up's dry frame (render/warm.js) drew no reflection: the ground must not
+    // look one up until a real frame has drawn it
+    afterDryFrame() { if (live) setOn(0); },
     render(post) {
       if (++sinceScan >= SCAN_EVERY || post.snap) { sinceScan = 0; scan(); }
       const cam = post.camera;

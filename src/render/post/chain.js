@@ -266,6 +266,7 @@ export function createPost(G) {
     },
     // Jump eye adaptation to the metered value on the next frame (teleports, staged shots, respawn).
     snapExposure() { snap = true; },
+    get snapPending() { return snap; },
 
     resize(w, h) {
       width = w; height = h;

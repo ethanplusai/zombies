@@ -18,6 +18,12 @@ import { EYE, EYE_R, MOUTH_Y } from './head.js';
 import { WRIST } from './hands.js';
 import { ELBOW, KNEE } from './figure.js';
 import { SHOULDER, ARM_ABDUCT } from '../skeleton.js';
+import { canCompileInParallel, gpuIdle } from '../../render/warm.js';
+import { rollLoops, ROLL_UNIFORMS } from '../../render/rollLoops.js';
+
+// The bake shaders' loops stay loops (render/rollLoops.js): Direct3D's compiler otherwise unrolls them,
+// and every call inside them, into seconds of compile on every Windows PC.
+const ROLLED = (src) => rollLoops(src).src;
 
 const v3 = (a) => `vec3(${a.map((v) => v.toFixed(5)).join(', ')})`;
 
@@ -262,7 +268,9 @@ void main() {
     for (int r = 1; r <= 6; r++) for (int d = 0; d < 8; d++) {
       vec2 o = vec2(d == 0 || d == 4 || d == 5 ? 1.0 : d == 1 || d == 6 || d == 7 ? -1.0 : 0.0, d == 2 || d == 4 || d == 6 ? 1.0 : d == 3 || d == 5 || d == 7 ? -1.0 : 0.0) * float(r);
       float l = length(o);
-      if (l < best && texture(tM, vUv + o * uPx).r > 0.5) { best = l; uv = vUv + o * uPx; }
+      // level 0 named outright: tM has no mip levels, so this is what texture() read, without a
+      // derivative inside the loop's branch (Direct3D's compiler warns about those, X3595)
+      if (l < best && textureLod(tM, vUv + o * uPx, 0.0).r > 0.5) { best = l; uv = vUv + o * uPx; }
     }
   }
   o0 = texture(t0, uv); o1 = texture(t1, uv); o2 = texture(t2, uv);
@@ -292,6 +300,24 @@ export function primTexture(fig) {
 function setupOut(tex, aniso) {
   tex.minFilter = LinearMipmapLinearFilter; tex.magFilter = LinearFilter; tex.generateMipmaps = true;
   tex.wrapS = ClampToEdgeWrapping; tex.wrapT = ClampToEdgeWrapping; tex.colorSpace = NoColorSpace; tex.anisotropy = aniso;
+}
+
+// Compiles a bake's shaders before its first draw, so that draw does not wait for the driver:
+// [scene, target] pairs, each compiled against its target. With KHR_parallel_shader_compile on the
+// driver's threads; without it the compile is issued and waited for with a GPU fence (warm.js gpuIdle).
+function compileFirst(renderer, pairs, cam) {
+  const parallel = canCompileInParallel(renderer) && typeof renderer.compileAsync === 'function';
+  const prev = renderer.getRenderTarget();
+  const waits = [];
+  try {
+    for (const [scene, target] of pairs) {
+      renderer.setRenderTarget(target);
+      if (parallel) waits.push(renderer.compileAsync(scene, cam).catch(() => {}));
+      else renderer.compile(scene, cam);
+    }
+  } catch { /* the first draw compiles it */ } finally { renderer.setRenderTarget(prev); }
+  // without the extension the compile runs in the browser's GPU process: wait for it there
+  return Promise.all(waits).then(() => gpuIdle(renderer.getContext ? renderer.getContext() : null));
 }
 
 // What a job needs to run: saves and restores the renderer's state around each slice.
@@ -344,8 +370,9 @@ export function bakeCharacter(G, figure, atlas, opts = {}) {
   const ju = jointUniforms(figure);
   const pad = (list, n, w) => { const o = []; for (let i = 0; i < n; i++) o.push(...(list[i] || new Array(w).fill(0))); return new Float32Array(o); };
   const mat = new RawShaderMaterial({
-    glslVersion: GLSL3, vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false, blending: NoBlending, side: DoubleSide,
+    glslVersion: GLSL3, vertexShader: VERT, fragmentShader: ROLLED(FRAG), depthTest: false, depthWrite: false, blending: NoBlending, side: DoubleSide,
     uniforms: {
+      ...ROLL_UNIFORMS(),
       tPrims: { value: prims }, uPrimN: { value: figure.n }, tNzA: { value: G.mats.noise.tNzA }, tNzB: { value: G.mats.noise.tNzB }, uRes: { value: [size, size] },
       uJoint: { value: pad(ju.J, 24, 4) }, uJointAx: { value: pad(ju.A, 24, 3) }, uJointN: { value: ju.J.length },
       uNail: { value: pad(ju.N, 5, 4) }, uNailAx: { value: pad(ju.NA, 5, 3) }, uNailUp: { value: [Math.cos(ARM_ABDUCT), Math.sin(ARM_ABDUCT), 0] },
@@ -361,30 +388,50 @@ export function bakeCharacter(G, figure, atlas, opts = {}) {
   const cam = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const regions = atlas.regions.slice();
   const total = regions.length + 1;
+  // the pass that grows every region into its gutter, drawn last
+  const dm = new RawShaderMaterial({
+    glslVersion: GLSL3, vertexShader: QUAD_VERT, fragmentShader: DILATE, depthTest: false, depthWrite: false, blending: NoBlending,
+    uniforms: { t0: { value: tmp.textures[0] }, t1: { value: tmp.textures[1] }, t2: { value: tmp.textures[2] }, tM: { value: tmp.textures[3] }, uPx: { value: [1 / size, 1 / size] } },
+  });
+  const quad = new Mesh(new PlaneGeometry(2, 2), dm); quad.frustumCulled = false;
+  const s2 = new Scene(); s2.add(quad);
   let at = 0;
+  let band = 0; let bands = 1;
   const t0 = performance.now();
   const job = {
     normalAo: out.textures[0], albedoRough: out.textures[1], thicknessCavity: out.textures[2], done: false, progress: 0, ms: 0, target: out,
+    // resolves once both shaders are compiled (see compileFirst); step() works without waiting for it
+    prepare() { return compileFirst(renderer, [[scene, tmp], [s2, out]], cam); },
+    // bands > 1: a region is drawn in that many horizontal strips, one strip a step (a scissor on
+    // the target). Each texel is written by the same triangles in the same order, so the maps are
+    // the same; a slow GPU gets shorter pieces of work. Read when a region starts.
+    bands: 1,
     step() {
       if (job.done) return true;
       withRenderer(renderer, () => {
-        if (at === 0) { renderer.setRenderTarget(tmp); renderer.setClearColor(0x000000, 0); renderer.clear(true, false, false); }
+        if (at === 0 && band === 0) { renderer.setRenderTarget(tmp); renderer.setClearColor(0x000000, 0); renderer.clear(true, false, false); }
         if (at < regions.length) {
+          if (band === 0) bands = Math.max(1, Math.min(64, Math.floor(job.bands) || 1));
           geo.setDrawRange(regions[at][0], regions[at][1]);
+          if (bands > 1) {
+            const h = Math.ceil(size / bands);
+            tmp.scissor.set(0, band * h, size, Math.min(h, size - band * h));
+            tmp.scissorTest = true;
+          }
           renderer.setRenderTarget(tmp);
-          renderer.render(scene, cam);
+          try { renderer.render(scene, cam); } finally { tmp.scissorTest = false; }
         } else {
-          const dm = new RawShaderMaterial({
-            glslVersion: GLSL3, vertexShader: QUAD_VERT, fragmentShader: DILATE, depthTest: false, depthWrite: false, blending: NoBlending,
-            uniforms: { t0: { value: tmp.textures[0] }, t1: { value: tmp.textures[1] }, t2: { value: tmp.textures[2] }, tM: { value: tmp.textures[3] }, uPx: { value: [1 / size, 1 / size] } },
-          });
-          const quad = new Mesh(new PlaneGeometry(2, 2), dm); quad.frustumCulled = false;
-          const s2 = new Scene(); s2.add(quad);
           renderer.setRenderTarget(out);
           renderer.render(s2, cam);
           dm.dispose(); quad.geometry.dispose();
         }
       });
+      if (at < regions.length && ++band < bands) {
+        job.progress = (at + band / bands) / total;
+        if (opts.onProgress) opts.onProgress(job.progress);
+        return false;
+      }
+      band = 0;
       at++;
       job.progress = at / total;
       if (opts.onProgress) opts.onProgress(job.progress);
@@ -565,8 +612,9 @@ export function bakeGarments(G, pieces, size) {
   const rt = new WebGLRenderTarget(size, size, { depthBuffer: false, type: UnsignedByteType, format: RGBAFormat });
   setupOut(rt.texture, Math.min(4, renderer.capabilities.getMaxAnisotropy()));
   const mat = new RawShaderMaterial({
-    glslVersion: GLSL3, vertexShader: GARMENT_VERT, fragmentShader: GARMENT_FRAG, depthTest: false, depthWrite: false, blending: NoBlending, side: DoubleSide,
-    uniforms: { tNzA: { value: G.mats.noise.tNzA }, uRect: { value: [0, 0, 1, 1] }, uGut: { value: 5 / 1024 }, uSize: { value: [1, 1] }, uKind: { value: 0 }, uStyle: { value: 0 }, uV: { value: [0, 0, 0, 0] }, uSeed: { value: 0 } },
+    glslVersion: GLSL3, vertexShader: GARMENT_VERT, fragmentShader: ROLLED(GARMENT_FRAG), depthTest: false, depthWrite: false, blending: NoBlending, side: DoubleSide,
+    uniforms: {
+      ...ROLL_UNIFORMS(), tNzA: { value: G.mats.noise.tNzA }, uRect: { value: [0, 0, 1, 1] }, uGut: { value: 5 / 1024 }, uSize: { value: [1, 1] }, uKind: { value: 0 }, uStyle: { value: 0 }, uV: { value: [0, 0, 0, 0] }, uSeed: { value: 0 } },
   });
   const geo = new BufferGeometry();
   geo.setAttribute('position', new BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]), 3));
@@ -581,13 +629,16 @@ export function bakeGarments(G, pieces, size) {
   const t0 = performance.now();
   const job = {
     texture: rt.texture, done: false, progress: 0, ms: 0, target: rt,
+    perStep: 12, // pieces drawn per step (fewer on a slow GPU; the result is the same)
+    prepare() { return compileFirst(renderer, [[scene, rt]], cam); },
     step() {
       if (job.done) return true;
       withRenderer(renderer, () => {
         renderer.setRenderTarget(rt);
         if (at === 0) { renderer.setClearColor(0x8080ff, 0.5); renderer.clear(true, false, false); }
         const u = mat.uniforms;
-        for (let n = 0; n < 12 && at < list.length; n++, at++) {
+        const per = Math.max(1, Math.min(12, Math.floor(job.perStep) || 12));
+        for (let n = 0; n < per && at < list.length; n++, at++) {
           const p = list[at];
           u.uRect.value = p.rect; u.uSize.value = [p.W, p.H]; u.uKind.value = KIND[p.kind] ?? 4; u.uSeed.value = 1.37 + at * 0.61;
           let style = 0;

@@ -202,14 +202,20 @@ export function createQuality(G, env) {
       return Promise.resolve(q.tier);
     },
     // Measures and picks. Synchronous inside (main.js calls it between the first frame and hiding
-    // the boot bar); the promise is there so callers need not care.
-    autoSelect() {
+    // the boot bar); the promise is there so callers need not care. { settle: false } skips the one
+    // frame drawn at the chosen tier: the caller draws it with settle() once that tier's shaders are ready.
+    get benchPending() { return pending; },
+    settle() { try { E.settle(G); } catch { /* the frame loop will report it */ } },
+    autoSelect(opts = {}) {
       if (!pending) return Promise.resolve(q.tier);
       pending = false;
       let ms = null; let tier;
       benching = true;
       try {
         if (E.hidden()) throw new Error('the tab is hidden');
+        // a software renderer (no graphics card in use): the benchmark could only say `mobile`, after
+        // seconds per frame. Not stored, so a visit with hardware acceleration back on measures again.
+        if (opts.software) throw new Error('software renderer');
         if (q.tier !== BENCH_TIER) apply(BENCH_TIER, null);
         ms = E.bench(G).ms;
         if (E.hidden()) throw new Error('the tab was hidden while it ran');
@@ -218,13 +224,13 @@ export function createQuality(G, env) {
       } catch (e) {
         // nothing stored: the next visit measures again
         ms = null;
-        tier = G.device && G.device.touch ? 'mobile' : 'low';
+        tier = G.device && G.device.touch ? 'mobile' : opts.software ? 'mobile' : 'low';
         E.warn(`[quality] tier benchmark did not finish (${e && e.message}): using ${tier} for this visit`);
       }
       benching = false;
       q.auto = true; q.benchMs = ms;
       apply(tier, { benchMs: ms });
-      try { E.settle(G); } catch { /* the frame loop will report it */ }
+      if (opts.settle !== false) q.settle();
       return Promise.resolve(tier);
     },
     setRenderScale(s) {

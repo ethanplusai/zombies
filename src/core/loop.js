@@ -48,6 +48,12 @@ export function createLoop(G, { onError }) {
   }
 
   return {
+    // A frame in two halves, for the boot: the simulation step, then (after the shaders are warm) its picture.
+    update(rawDt) {
+      G.time.real = performance.now() / 1000;
+      updateAll(resolveDt(rawDt));
+    },
+    render,
     // One full frame: update + render. rawDt in seconds.
     frame(rawDt) {
       const t0 = performance.now();

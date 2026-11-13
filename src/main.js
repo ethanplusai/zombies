@@ -7,6 +7,9 @@ import { createRng } from './core/rng.js';
 import { createEvents } from './core/events.js';
 import { createLoop } from './core/loop.js';
 import { installErrorCapture, installHarness, stageShotFromParams } from './core/harness.js';
+import { createBootWatch } from './core/bootwatch.js';
+import { isSoftwareRenderer, rendererName } from './render/software.js';
+import { createWarm, kickCompile, gpuIdle, yieldToPage } from './render/warm.js';
 import { stubs } from './core/stubs.js';
 import { createQuality } from './render/quality.js';
 import { createRenderer } from './render/renderer.js';
@@ -43,7 +46,12 @@ const MODULES = [
 ];
 
 const pushError = installErrorCapture();
-const raf = () => new Promise((r) => requestAnimationFrame(r));
+const watch = createBootWatch();
+window.__bootDetails = () => watch.details(); // the text "Copy details" copies, for the harness and support
+// the boot bar: building the modules fills the first 40%, drawing the effects atlases the next 10%,
+// preparing shaders the rest
+const MODULES_SHARE = 0.5;
+const BUILD_SHARE = 0.4;
 
 // No renderer or no post chain: nothing can be drawn. Say so instead of leaving a black page
 // (the renderer shows its own message when WebGL2 is missing; this covers every other failure).
@@ -87,18 +95,51 @@ async function boot() {
 
   for (let i = 0; i < list.length; i++) {
     const [name, make] = list[i];
-    setBoot(i / list.length, name);
+    setBoot((i / list.length) * BUILD_SHARE, name);
+    watch.stage(name);
     try {
       G[name] = make(G);
     } catch (e) {
       console.warn(`[boot] ${name} failed`, e);
       pushError(`[boot] ${name} failed: ${e && e.message}`);
       G[name] = (stubs[name] || (() => ({ stub: true, update() {} })))();
+      watch.fail(name, e);
     }
-    await raf();
+    if (name === 'renderer' && !G.renderer.stub) watch.attach(G.renderer);
+    // the zombie pool and the weapon are in the scene now: their compiles (the slowest ones) start
+    // here, on the driver's threads, while the remaining modules build
+    if (name === 'zombies') kickCompile(G);
+    // a whole turn (a paint, timers) between modules, not only an animation frame: the loading
+    // screen keeps moving and the boot watch's heartbeat sees each module on its own. Turns go on
+    // until the GPU has finished what this module queued (a fence: a fast GPU is done within the
+    // first turn), so the next module's first query does not sit waiting for it.
+    const gl = G.renderer && !G.renderer.stub && G.renderer.getContext ? G.renderer.getContext() : null;
+    if (gl) await gpuIdle(gl); else await yieldToPage();
   }
 
-  if (G.renderer.stub || G.post.stub) showRenderFailure();
+  const canDraw = !G.renderer.stub && !G.post.stub;
+  // The effects atlases have been drawing in the background since the fx module was built
+  // (fx/atlas.js); nothing may sample them before they are complete.
+  if (G.fx && G.fx.ready && typeof G.fx.ready.then === 'function') {
+    watch.stage('effects');
+    let done = false;
+    G.fx.ready.then(() => { done = true; }, () => { done = true; });
+    // where the browser cannot compile in parallel the atlases start only now, with every module
+    // built: no later step can run into one of their compiles while it is pending
+    if (typeof G.fx.startEffects === 'function') G.fx.startEffects();
+    while (!done) {
+      const f = typeof G.fx.readyProgress === 'function' ? G.fx.readyProgress() : 0;
+      const label = typeof G.fx.readyLabel === 'function' ? G.fx.readyLabel() : 'Preparing effects';
+      setBoot(BUILD_SHARE + (MODULES_SHARE - BUILD_SHARE) * f, label);
+      watch.status(label);
+      await yieldToPage();
+    }
+    watch.status('');
+  }
+  if (!canDraw) {
+    showRenderFailure();
+    watch.decorate(document.getElementById('gfx-unsupported') || document.getElementById('gfx-failed'));
+  }
 
   // The game opens on its title screen (no game:state event announces the first state).
   if (G.game && !G.game.stub && G.game.state === 'title') G.weapon?.setVisible?.(false);
@@ -108,16 +149,40 @@ async function boot() {
   stageShotFromParams(G);
   if (params.adv) loop.advance(params.adv);
 
-  // First full frame. In step mode dt is 0 here so staged shots start from the same state.
-  loop.frame(params.step ? 0 : 1 / 60);
-  // boot benchmark picks the tier (no-op until the render tiers exist); it must never stop the boot
+  // First full frame. In step mode dt is 0 here so staged shots start from the same state. Its
+  // simulation step runs first, then every shader its picture needs is compiled (render/warm.js)
+  // without freezing the page, then it is drawn.
+  const dt0 = params.step ? 0 : 1 / 60;
+  if (canDraw) {
+    watch.stage('update');
+    loop.update(dt0);
+    // a failure here must not stop the boot: whatever was not prepared is compiled by the first frame, as before
+    try { await warmShaders(G, 'shaders'); } catch (e) { pushError(`[boot] shader warm-up: ${e && e.message}`); }
+    watch.stage('first frame');
+    loop.render();
+    await yieldToPage(); // a frame takes seconds on a software renderer: the page gets a turn after each
+  } else loop.frame(dt0);
+  // boot benchmark picks the tier (no-op until the render tiers exist); it must never stop the boot.
+  // A new tier can need new shaders (surface detail, light counts): those are prepared the same way
+  // before the one frame drawn at that tier.
   try {
-    const r = G.quality.autoSelect?.();
+    watch.stage('tier');
+    const benchDue = !!(G.quality && G.quality.benchPending);
+    const software = canDraw && isSoftwareRenderer(rendererName(G.renderer.getContext()));
+    const r = G.quality.autoSelect?.({ settle: !canDraw, software });
     if (r && typeof r.catch === 'function') r.catch((e) => pushError(`[boot] autoSelect: ${e && e.message}`));
+    if (benchDue && canDraw) {
+      if (G.lights && typeof G.lights.syncTier === 'function') G.lights.syncTier();
+      await warmShaders(G, 'shaders (tier)');
+      watch.stage('settle');
+      if (typeof G.quality.settle === 'function') G.quality.settle();
+      await yieldToPage();
+    }
   } catch (e) { pushError(`[boot] autoSelect: ${e && e.message}`); }
   setBoot(1, 'ready');
   document.getElementById('boot')?.classList.add('done');
   window.__ready = true;
+  watch.ready();
 
   let last = performance.now();
   const tick = (now) => {
@@ -142,4 +207,31 @@ async function boot() {
   requestAnimationFrame(tick);
 }
 
-boot().catch((e) => pushError(`[boot] fatal: ${e && e.stack ? e.stack : e}`));
+// Compiles the shaders the next frame needs (render/warm.js), with the count on the loading screen.
+// A context lost meanwhile: wait for it to come back (renderer.js and the boot watch put up a
+// message with Reload if it does not) and start again, since a restored context has no programs.
+let warm = null;
+async function warmShaders(G, stage) {
+  watch.stage(stage);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (!warm) warm = createWarm(G);
+    const s = await warm({
+      onProgress: (w) => {
+        watch.progress(w);
+        setBoot(MODULES_SHARE + (1 - MODULES_SHARE) * (w.total ? Math.min(1, w.ready / w.total) : 0), 'Preparing graphics');
+      },
+    });
+    window.__warm = s;
+    (window.__warmRuns = window.__warmRuns || []).push(s);
+    if (s.failed.length) pushError(`[warm] ${s.failed.length} shader program${s.failed.length === 1 ? '' : 's'} failed: ${s.failed.join(', ')}`);
+    if (!s.lost) break;
+    warm = null;
+    await watch.waitForRestore();
+  }
+  watch.warmDone();
+}
+
+boot().catch((e) => {
+  pushError(`[boot] fatal: ${e && e.stack ? e.stack : e}`);
+  watch.fatal(e);
+});

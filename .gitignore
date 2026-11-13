@@ -9,3 +9,6 @@ dist
 server/wrangler.toml
 server/.wrangler/
 .wrangler/
+
+# generated shader dumps (scripts/dump-boot-shaders.mjs)
+scripts/shaders-*.json

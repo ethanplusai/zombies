@@ -17,6 +17,7 @@ import {
 import { stubs } from '../core/stubs.js';
 import { createFxLights, readVec, FX_LIGHT_GLSL } from './fxlights.js';
 import { createAtlases, P_CELL } from './atlas.js';
+import { isSoftwareRenderer, rendererName } from '../render/software.js';
 import { createDecals, goreOf, spatterSize } from './decals.js';
 import { installFxTest } from './fxtest.js';
 import { createRingUploader } from './ring.js';
@@ -425,7 +426,15 @@ export function createFx(G) {
   let stream = G.rng.fork('fx');
   const rng = { next: () => stream.next(), int: (a, b) => stream.int(a, b), range: (a, b) => stream.range(a, b) };
   const lights = createFxLights(G);
-  const atlases = createAtlases(post);
+  // drawn over the next frames (atlas.js); the boot waits for fx.ready before the first frame. Half
+  // size on the low and mobile tiers and on a software renderer, at once in staged shots and stepped runs.
+  const tier = G.quality && G.quality.tier;
+  const soft = isSoftwareRenderer(rendererName(post.renderer.getContext && post.renderer.getContext()));
+  const atlases = createAtlases(post, {
+    scale: tier === 'low' || tier === 'mobile' || soft ? 0.5 : 1,
+    now: !!(G.params && (G.params.shot || G.params.step)),
+  });
+  if (typeof window !== 'undefined') { window.__fxBake = atlases.stats; window.__fxAtlases = atlases; } // load cost and targets, for the harness
   // The fx clock: particle and decal ages are measured on it. A staged shot pins it.
   const clock = { now: 100, frozen: false };
   const decals = createDecals(G, post, atlases.decals.texture, lights, clock, rng);
@@ -946,6 +955,8 @@ export function createFx(G) {
   // eslint-disable-next-line prefer-const
   let fx = null;
   fx = {
+    // the effects atlases: a promise that resolves once they are drawn, and how far along they are (0..1)
+    ready: atlases.ready, readyProgress: () => atlases.progress(), readyLabel: () => atlases.label(), startEffects: () => atlases.start(),
     muzzle, impact, blood, casing, ejectCasing, puff, decal, emit, clear, bloodDecal, bloodParticles,
     // retire one blood decal by the slot bloodDecal returned: gone in about a second (the pool cap)
     fadeBloodDecal(slot, seconds = 1) { return decals.fadeBlood(slot, seconds); },

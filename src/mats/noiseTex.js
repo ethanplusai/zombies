@@ -179,9 +179,8 @@ export function createNoiseTextures(renderer) {
   renderer.shadowMap.autoUpdate = prevShadow;
   if (renderer.xr) renderer.xr.enabled = prevXr;
   mat.dispose(); quad.geometry.dispose();
-  // force completion so the reported time is the real cost, not deferred work
-  const gl = renderer.getContext();
-  gl.finish();
+  // the time to issue the work (the GPU finishes it in the background; waiting here with
+  // gl.finish() held the boot for the whole of it)
   out.ms = performance.now() - t0;
   return out;
 }

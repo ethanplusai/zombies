@@ -1,7 +1,15 @@
 // Flipbook atlases for particles and decals, drawn once at load by fragment shaders.
 // Both store smooth fields and normals rather than finished colour: the particle and decal shaders
 // light them, threshold them and tint them, so one cell serves many looks and edges stay crisp.
-import { WebGLRenderTarget, UnsignedByteType, RGBAFormat, LinearFilter, LinearMipmapLinearFilter, ClampToEdgeWrapping } from 'three';
+import {
+  WebGLRenderTarget, UnsignedByteType, RGBAFormat, LinearFilter, LinearMipmapLinearFilter, ClampToEdgeWrapping,
+  BufferGeometry, BufferAttribute, Mesh, OrthographicCamera,
+} from 'three';
+
+import { gpuIdle } from '../render/warm.js';
+import { rollLoops, ROLL_UNIFORMS } from '../render/rollLoops.js';
+
+const CAM = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
 // ---- particle atlas: 8 x 8 cells -----------------------------------------------------------
 export const P_GRID = 8;
@@ -326,27 +334,228 @@ void main() {
   outColor = o;
 }`;
 
-function bake(post, size, frag, into) {
-  const rt = into || new WebGLRenderTarget(size, size, {
-    type: UnsignedByteType, format: RGBAFormat, depthBuffer: false,
-    minFilter: LinearMipmapLinearFilter, magFilter: LinearFilter, generateMipmaps: true,
-    wrapS: ClampToEdgeWrapping, wrapT: ClampToEdgeWrapping,
-  });
-  const mat = post.fsMaterial({ fragmentShader: post.glsl.common + NOISE + frag });
-  const prev = post.renderer.getRenderTarget();
-  post.blit(mat, rt);
-  post.renderer.setRenderTarget(prev); // leaving the target also builds the mip chain
-  mat.dispose();
-  return rt;
+const ATLAS_OPTS = {
+  type: UnsignedByteType, format: RGBAFormat, depthBuffer: false,
+  minFilter: LinearMipmapLinearFilter, magFilter: LinearFilter, generateMipmaps: true,
+  wrapS: ClampToEdgeWrapping, wrapT: ClampToEdgeWrapping,
+};
+
+// ---- one small program per kind of cell, loops left rolled ---------------------------------------
+// Each atlas shader picks what to draw with an if/else over the cell index. Compiled whole, with
+// every loop unrolled, Direct3D's compiler took 99 s (particles) and 196 s (decals) on a slow PC.
+// So each atlas is drawn by one program per kind of cell: branch i of main() is guarded by `K == i`
+// and the program is compiled with #define K i, so the other branches are compiled out; and its
+// loops keep a bound the compiler cannot see (render/rollLoops.js). Each program is drawn only into
+// its own cells (a scissor), where it runs exactly the code the whole shader ran there; cells no
+// branch claims get the shader's default (K = -1: no branch). The kinds, in branch order:
+export const ATLAS_KINDS = {
+  particles: { grid: 8, kinds: [[0, 15], [16, 19], [20, 23], [24, 31], [32, 35], [36, 39], [40, 47], [48, 48], [49, 49], [50, 50], [52, 59], [51, 51]] },
+  decals: { grid: 4, kinds: [[0, 1], [2, 3], [4, 5], [6, 6], [7, 7], [8, 11], [12, 13], [14, 15]] },
+};
+const BRANCH = /(\n\s*(?:\} else )?if \()(cell\b)/g;
+// The atlas source with branch i guarded by K == i; returns { src, branches }.
+export function guardBranches(frag) {
+  let n = 0;
+  const src = frag.replace(BRANCH, (m, a, b) => `${a}K == ${n++} && ${b}`);
+  return { src, branches: n };
+}
+export const PARTICLE_SRC = PARTICLE_FRAG;
+export const DECAL_SRC = DECAL_FRAG;
+
+// The programs of one atlas: [{ k, cells: [cell...] }], k = -1 for the cells no branch claims.
+export function atlasPlan(which) {
+  const { grid, kinds } = ATLAS_KINDS[which];
+  const plan = kinds.map(([lo, hi], k) => ({ k, cells: Array.from({ length: hi - lo + 1 }, (_, i) => lo + i) }));
+  const claimed = new Set(plan.flatMap((p) => p.cells));
+  const rest = Array.from({ length: grid * grid }, (_, i) => i).filter((c) => !claimed.has(c));
+  if (rest.length) plan.push({ k: -1, cells: rest });
+  return plan;
 }
 
-export function createAtlases(post) {
-  const particles = bake(post, 2048, PARTICLE_FRAG);
-  const decals = bake(post, 1024, DECAL_FRAG);
+function programsFor(post, which, frag) {
+  const body = rollLoops(guardBranches(NOISE + frag).src).src;
+  return atlasPlan(which).map(({ k, cells }) => ({
+    k, cells,
+    mat: post.fsMaterial({ fragmentShader: post.glsl.common + body, uniforms: ROLL_UNIFORMS(), defines: { K: k } }),
+  }));
+}
+
+// Draws `cells` of one program into the atlas, each through a scissor. `mips`: build the mip chain
+// after this draw (only after the last one; and after the first, which also sets the target up).
+function drawCells(post, rt, grid, mat, cells, mipsAfter) {
+  const r = post.renderer;
+  const cs = rt.width / grid;
+  const prev = r.getRenderTarget();
+  try {
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      rt.scissor.set((c % grid) * cs, Math.floor(c / grid) * cs, cs, cs);
+      rt.scissorTest = true;
+      rt.texture.generateMipmaps = mipsAfter(i === cells.length - 1);
+      post.blit(mat, rt);
+    }
+  } finally {
+    r.setRenderTarget(prev);
+    rt.scissorTest = false;
+    rt.texture.generateMipmaps = true;
+  }
+}
+
+// All at once (staged shots and stepped runs, and a restored context: the atlases are needed now).
+function bakeNow(post, rt, which, frag) {
+  const progs = programsFor(post, which, frag);
+  const { grid } = ATLAS_KINDS[which];
+  progs.forEach((p, i) => drawCells(post, rt, grid, p.mat, p.cells, (lastCell) => (i === 0) || (lastCell && i === progs.length - 1)));
+  for (const p of progs) p.mat.dispose();
+}
+
+// ---- drawing at load without holding the page -----------------------------------------------
+// With KHR_parallel_shader_compile every program is compiled at once on the driver's threads (the
+// boot starts this when the fx module is built). Without it (Firefox) nothing starts until the boot
+// reaches its effects step (start()), and then one program at a time: its compile is issued, waited
+// for with a GPU fence (render/warm.js gpuIdle: the page is not blocked, and nothing else is running
+// that could hit the pending compile), and its cells drawn. Cells are drawn a few per step, the next
+// step waiting for a fence on the last; the number per step grows while the GPU keeps up and shrinks
+// when a step takes it longer than STEP_MS. The mip chain is built once, after the last cell.
+// Nothing samples an atlas before `ready` resolves: the boot waits for it before the first frame.
+export const STEP_MS = 80;
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// one turn of the page (a paint where there are frames; a plain timeout in a hidden tab)
+const turn = () => new Promise((resolve) => {
+  let done = false;
+  const go = () => { if (!done) { done = true; resolve(); } };
+  setTimeout(go, 100);
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(go, 0));
+});
+
+// Cells for the next step from the last: n * target / measured, between 1 and n * 4.
+export function nextCells(n, gpuMs, target = STEP_MS) {
+  return Math.max(1, Math.min(n * 4, Math.round(n * target / Math.max(gpuMs, 1))));
+}
+// kept for the strip-sizing test of an earlier version: rows * target / measured within [8, size]
+export function nextRows(rows, gpuMs, size, target = STEP_MS) {
+  const want = Math.round(rows * target / Math.max(gpuMs, 1));
+  return Math.max(8, Math.min(size, want, rows * 4));
+}
+
+function parallelCompile(renderer) {
+  try { return !!(renderer.extensions && renderer.extensions.has('KHR_parallel_shader_compile')); } catch { return false; }
+}
+
+// Issues the compile of one atlas program against its target; resolves when it can be used without
+// waiting (compileAsync with the extension; a GPU fence without it).
+function compileProgram(post, rt, mat, parallel) {
+  const r = post.renderer;
+  const geo = new BufferGeometry();
+  geo.setAttribute('position', new BufferAttribute(new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]), 3));
+  const tri = new Mesh(geo, mat); tri.frustumCulled = false;
+  const prev = r.getRenderTarget();
+  let waitFor = null;
+  try {
+    r.setRenderTarget(rt);
+    if (parallel && typeof r.compileAsync === 'function') waitFor = r.compileAsync(tri, CAM);
+    else r.compile(tri, CAM);
+  } catch { waitFor = null; } finally { r.setRenderTarget(prev); }
+  const done = waitFor ? waitFor.catch(() => {}) : gpuIdle(r.getContext(), turn);
+  return done.then(() => geo.dispose());
+}
+
+async function bakeStepped(post, jobs, parallel, S) {
+  const r = post.renderer;
+  const gl = r.getContext();
+  const t0 = performance.now();
+  const lost = () => !!(gl && gl.isContextLost && gl.isContextLost());
+  // with the extension: every compile now, side by side
+  S.parallel = parallel;
+  if (parallel) S.phase = 'compiling';
+  const compiled = parallel ? jobs.flatMap((j) => j.progs.map((p) => {
+    const a = performance.now();
+    return compileProgram(post, j.rt, p.mat, true).then(() => { p.compileMs = Math.round(performance.now() - a); S.compiled++; });
+  })) : null;
+  // a compile that never reports (a context lost for good) must not hold the boot: after a minute the cells are drawn anyway
+  if (compiled) await Promise.race([Promise.all(compiled), new Promise((r) => setTimeout(r, 60000))]);
+  let n = 2; // cells per step
+  for (const j of jobs) {
+    const a0 = performance.now();
+    for (let pi = 0; pi < j.progs.length; pi++) {
+      const p = j.progs[pi];
+      if (lost()) return; // the restore handler bakes them again
+      if (!parallel) {
+        S.phase = 'compiling';
+        await turn(); // the label is painted before the compile is issued
+        const a = performance.now();
+        await compileProgram(post, j.rt, p.mat, false);
+        p.compileMs = Math.round(performance.now() - a);
+        S.compiled++;
+      }
+      S.phase = 'drawing';
+      for (let c = 0; c < p.cells.length;) {
+        if (lost()) return;
+        const take = p.cells.slice(c, c + n);
+        const first = pi === 0 && c === 0;
+        const lastAll = pi === j.progs.length - 1 && c + take.length >= p.cells.length;
+        const a = performance.now();
+        drawCells(post, j.rt, j.grid, p.mat, take, (lastCell) => (first) || (lastCell && lastAll));
+        const cpu = performance.now() - a;
+        j.stat.slowestStepMs = Math.max(j.stat.slowestStepMs, Math.round(cpu));
+        await gpuIdle(gl, turn);
+        const gpu = performance.now() - a;
+        if (j.stat.strips === 0) j.stat.firstStripMs = Math.round(gpu);
+        j.stat.strips++;
+        c += take.length;
+        S.drawn += take.length;
+        n = nextCells(take.length, gpu);
+      }
+    }
+    j.stat.compileMs = j.progs.reduce((m, p) => Math.max(m, p.compileMs || 0), 0);
+    j.stat.totalMs = Math.round(performance.now() - (parallel ? t0 : a0));
+    for (const p of j.progs) p.mat.dispose();
+  }
+}
+
+// The particle (2048) and decal (1024) atlases. `scale` 0.5 halves both (low and mobile tiers and
+// software renderers; never high or medium). Returns the targets at once, empty; `ready` resolves
+// when both are drawn; `progress()` is 0..1, `label()` says what is happening, `stats` has the timings.
+// opts.now: draw them here and now (staged shots and stepped runs, and tests). They start at once
+// where the browser compiles in parallel, and wait for start() where it does not (see above);
+// opts.defer true / false forces one or the other.
+export function createAtlases(post, opts = {}) {
+  const scale = opts.scale === 0.5 ? 0.5 : 1;
+  const particles = new WebGLRenderTarget(2048 * scale, 2048 * scale, ATLAS_OPTS);
+  const decals = new WebGLRenderTarget(1024 * scale, 1024 * scale, ATLAS_OPTS);
+  const list = [['particles', particles, PARTICLE_FRAG], ['decals', decals, DECAL_FRAG]];
+  const stats = list.map(([name, rt]) => ({ name, size: rt.width, compileMs: 0, firstStripMs: 0, strips: 0, slowestStepMs: 0, totalMs: 0 }));
+  const S = { phase: 'waiting', compiled: 0, programs: 0, drawn: 0, cells: 0 };
+  let ready; let start = () => {};
+  if (opts.now) {
+    list.forEach(([name, rt, frag], i) => { const a = performance.now(); bakeNow(post, rt, name, frag); stats[i].strips = 1; stats[i].totalMs = Math.round(performance.now() - a); });
+    S.phase = 'done';
+    ready = Promise.resolve();
+  } else {
+    const parallel = parallelCompile(post.renderer);
+    const jobs = list.map(([name, rt, frag], i) => ({ rt, grid: ATLAS_KINDS[name].grid, progs: programsFor(post, name, frag), stat: stats[i] }));
+    S.programs = jobs.reduce((n, j) => n + j.progs.length, 0);
+    S.cells = jobs.reduce((n, j) => n + j.progs.reduce((m, p) => m + p.cells.length, 0), 0);
+    let go;
+    const started = new Promise((res) => { go = res; });
+    start = () => go();
+    ready = started.then(() => wait(0)).then(() => bakeStepped(post, jobs, parallel, S))
+      .then(() => { S.phase = 'done'; }, (e) => { S.phase = 'done'; console.error(`[fx] atlas bake failed: ${e && e.message}`); });
+    // without the extension nothing starts before start(), unless asked to (opts.defer === false)
+    if (opts.defer === false || (opts.defer === undefined && parallel)) start();
+  }
   return {
-    particles, decals,
+    particles, decals, ready, stats, start,
+    // share of the work done: compiles and cells count alike
+    progress() { const all = S.programs + S.cells; return S.phase === 'done' || !all ? 1 : (S.compiled + S.drawn) / all; },
+    label() {
+      if (S.phase === 'compiling') return `Preparing effects: compiling ${Math.min(S.compiled + (S.parallel ? 0 : 1), S.programs)} / ${S.programs}`;
+      if (S.phase === 'drawing') return `Preparing effects: drawing ${Math.min(S.drawn, S.cells)} / ${S.cells}`;
+      return 'Preparing effects';
+    },
     // after a context restore the targets exist again but are empty: draw them again
-    rebake() { bake(post, 2048, PARTICLE_FRAG, particles); bake(post, 1024, DECAL_FRAG, decals); },
+    rebake() { bakeNow(post, particles, 'particles', PARTICLE_FRAG); bakeNow(post, decals, 'decals', DECAL_FRAG); },
     dispose() { particles.dispose(); decals.dispose(); },
   };
 }

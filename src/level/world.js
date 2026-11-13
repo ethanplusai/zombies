@@ -13,6 +13,7 @@ import { Group, InstancedMesh, MeshStandardMaterial, BoxGeometry, Matrix4, Vecto
 import { M, box, boxUp, cylUp, rgb } from './build.js';
 import { createAtlas } from './atlas.js';
 import { createCollision } from './collision.js';
+import { canCompileInParallel } from '../render/warm.js';
 import * as L from './layout.js';
 import * as W from './worldLayout.js';
 import { buildForecourt, makeMaterials, registerLights, meshesFor, createForecourtUpdate } from './forecourt.js';
@@ -729,10 +730,11 @@ export function createLevel(G) {
   }
 
   // Start the shader compiles now, against the HDR target the scene is really drawn into, so the
-  // driver links them in parallel while the remaining modules boot behind the progress bar.
+  // driver links them in parallel while the remaining modules boot behind the progress bar. Only where
+  // it can (KHR_parallel_shader_compile): elsewhere the boot's warm-up compiles them a few at a time.
   try {
     const target = G.post && G.post.targets && G.post.targets.scene;
-    if (target && G.renderer.compileAsync) {
+    if (target && G.renderer.compileAsync && canCompileInParallel(G.renderer)) {
       const prev = G.renderer.getRenderTarget();
       G.renderer.setRenderTarget(target);
       level.compiled = G.renderer.compileAsync(root, G.camera, G.scene).catch(() => {});
